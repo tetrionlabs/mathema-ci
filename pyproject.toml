@@ -1,0 +1,86 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mathema-ci"
+dynamic = ["version"]
+description = "mathema in CI: run the tests, measure implementation, intent and clarity, and publish the triangle, from one stage on your own runners."
+readme = "README.md"
+requires-python = ">=3.10"
+# Apache-2.0, as mathema-language: the algorithm and its licence are
+# core's; this package renders and runs.
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
+# core's public API (repo_badges, BadgeScores, project_coverage) is the
+# contract; it moves on minor releases, so the range stops before the
+# next one. coverage is what measure runs the suite under.
+dependencies = ["mathema>=0.6.2,<0.7", "pyyaml>=6", "coverage>=7"]
+keywords = ["mathema", "continuous-integration", "code-coverage",
+            "claim-driven-development", "github-actions", "gitlab-ci",
+            "pytest-plugin", "software-verification"]
+classifiers = [
+    # PEP 639: no License:: classifier beside the `license` expression
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-xdist>=3", "hypothesis>=6"]
+
+[project.urls]
+Homepage = "https://mathema.tetrionlabs.com"
+Documentation = "https://mathema.tetrionlabs.com"
+Repository = "https://github.com/tetrionlabs/mathema-ci"
+Issues = "https://github.com/tetrionlabs/mathema-ci/issues"
+Changelog = "https://github.com/tetrionlabs/mathema-ci/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mathema-ci = "mathema_ci.cli:main"
+
+# The pytest plugin is registered on install and stays inert until the
+# run asks for it (--mathema-ledger or MATHEMA_LEDGER=1), so a project
+# that installs this package for `measure` sees no change to a plain
+# `pytest` run.
+[project.entry-points.pytest11]
+mathema = "mathema_pytest.plugin"
+
+[tool.hatch.version]
+path = "src/mathema_ci/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mathema_ci", "src/mathema_pytest"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE",
+           "NOTICE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# the same scoped set core uses: real defects, not style
+select = ["E", "F", "W", "B", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["mathema_ci", "mathema_pytest"]
+ignore_missing_imports = true
+warn_unused_ignores = true

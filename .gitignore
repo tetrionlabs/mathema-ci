@@ -1,0 +1,28 @@
+# stateful markdown, never committed
+.smd/
+*.smd
+
+# assistant/session files, never committed
+.claude/
+CLAUDE.md
+
+# macOS
+.DS_Store
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.json
+coverage.sources.json
+.mypy_cache/
+.ruff_cache/
+
+# stores written by running the examples/tests locally
+.mathema/
