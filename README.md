@@ -25,7 +25,10 @@ as the tests did.
 ## Layout
 
 - `src/mathema_ci/`: the `measure` command, the artifact writers, the
-  report page, the README block, the pipeline templates.
+  report page, the README block, the pipeline templates. Today it holds
+  `render.render_triangle`, `render.render_svg`, `render.shields_payloads`,
+  `artifacts.write_badges`, `artifacts.ci_snapshot`,
+  `artifacts.readme_snippet` and `templates.write_ci_templates`.
 - `src/mathema_pytest/`: the pytest plugin that writes the run ledger.
   It imports nothing from mathema, since it runs inside the measured
   project's test process.
@@ -35,3 +38,7 @@ as the tests did.
 Apache License 2.0, as mathema-language. The measurement this package
 runs is mathema's, under mathema's own licence. See `LICENSE` and
 `NOTICE`.
+
+The mathema name and the triangle mark are trademarks of Tetrion Ltd and
+are not licensed under the Apache License (its section 6 grants no
+trademark rights).
