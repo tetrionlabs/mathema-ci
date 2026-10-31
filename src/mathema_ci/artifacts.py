@@ -110,8 +110,10 @@ _MEANINGS = (
 def readme_snippet() -> str:
     """A paste-ready README block: the three shields and the triangle,
     centred, then what each score means, each linking to the section of
-    the badge docs that defines it. The shields read the committed JSON by
-    raw URL, so the project substitutes OWNER/REPO once."""
+    the badge docs that defines it. The shields read the committed JSON
+    and the triangle the committed SVG by raw URL, so the block renders
+    wherever the README is shown, a PyPI project page included, and the
+    project substitutes OWNER/REPO once."""
     raw = ("https://raw.githubusercontent.com/OWNER/REPO/main/"
            ".mathema/badges")
     shields = "\n".join(
@@ -123,12 +125,12 @@ def readme_snippet() -> str:
     return ('<p align="center">\n'
             f"{shields}\n"
             "</p>\n\n"
-            "<!-- substitute OWNER/REPO above; the badges read the JSON "
-            "committed under .mathema/badges/ -->\n\n"
             '<p align="center">\n'
-            '  <img src=".mathema/badges/triangle.svg" '
+            f'  <img src="{raw}/triangle.svg" '
             'alt="mathema triangle" width="360">\n'
             "</p>\n\n"
+            "<!-- substitute OWNER/REPO above; the badges and the triangle "
+            "read the files committed under .mathema/badges/ -->\n\n"
             "| score | what it measures |\n|:---|:---|\n"
             f"{rows}\n\n"
             f"[ [mathema]({_DOCS_HOME}) ] know what your code actually "
