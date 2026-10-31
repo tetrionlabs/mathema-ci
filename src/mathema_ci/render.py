@@ -182,14 +182,21 @@ def render_svg(scores: BadgeScores) -> str:
     the full 100/100/100 triangle as a faint dashed frame, and each score
     a vertex on its spoke from the base centre (all zero) out to its
     corner, with the triangle they span filled in the accent. The overall
-    number sits top right. The card is self-contained (no external CSS,
+    number sits top right. The frame and its corner labels are centred
+    in the card, each base label within its corner. The card is
+    self-contained (no external CSS,
     images or font files), so it reads the same on a light or a dark
     README."""
+    # The figure is the frame with its three corner labels: the CLARITY
+    # label's cap height above the apex down to the base labels' descent
+    # below the base, 41 to 260, centred on the card's mid-height of 150.
+    # The base labels start and end at their corners, so the figure is
+    # as wide as the frame and centred on the card's mid-width too.
     w, h = 360, 300
-    apex = (180.0, 72.0)          # CLARITY, top
-    left = (56.0, 240.0)          # IMPL, bottom-left
-    right = (304.0, 240.0)        # INTENT, bottom-right
-    origin = (180.0, 240.0)       # all-zero sits at the base centre
+    apex = (180.0, 65.0)          # CLARITY, top
+    left = (56.0, 233.0)          # IMPL, bottom-left
+    right = (304.0, 233.0)        # INTENT, bottom-right
+    origin = (180.0, 233.0)       # all-zero sits at the base centre
     frame = {"CLARITY": apex, "IMPL": left, "INTENT": right}
     dims = (("CLARITY", scores.clarity),
             ("IMPL", scores.implementation),
@@ -223,8 +230,8 @@ def render_svg(scores: BadgeScores) -> str:
                  f'fill-opacity="0.16" stroke="{_ACCENT}" stroke-width="1.5" '
                  'stroke-linejoin="round"/>')
     label_pos = {"CLARITY": (apex[0], apex[1] - 16, "middle"),
-                 "IMPL": (left[0] - 8, left[1] + 30, "start"),
-                 "INTENT": (right[0] + 8, right[1] + 30, "end")}
+                 "IMPL": (left[0], left[1] + 24, "start"),
+                 "INTENT": (right[0], right[1] + 24, "end")}
     for name, sc in dims:
         vx, vy = pts[name]
         parts.append(f'<circle cx="{vx:.1f}" cy="{vy:.1f}" r="4.5" '
