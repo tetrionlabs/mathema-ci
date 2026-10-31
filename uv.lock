@@ -502,15 +502,15 @@ wheels = [
 
 [[package]]
 name = "mathema"
-version = "0.6.2.1"
+version = "0.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/92/da5dc5f40560c2fed7a372b3779b2861e4be8ad5bca4ae87275e88f4b6ae/mathema-0.6.2.1.tar.gz", hash = "sha256:e0214affb818fd5d20b14bbbe783c4e9fd97c7e2b8b5d58c624e202975bd5929", size = 2374144, upload-time = "2026-10-14T16:57:47.177Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b7/a2/cf805cfca9c53a5b2e87d9bc862c9352a3f50875d6fefe0230f2062facae/mathema-0.6.3.tar.gz", hash = "sha256:b81710d0117cab1d9e9c135f8137716594dba311e9ebb45cc1adb4b46ca29511", size = 2748872, upload-time = "2026-10-31T10:18:27.455Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/e3/8c879c04675c6c4eea1a9d4563f62000169822bcbbe32dc0684866a9980d/mathema-0.6.2.1-py3-none-any.whl", hash = "sha256:ca85c83086e86b81129994f7cd57b011b5fa57862e64bea70743935a213b843b", size = 1544569, upload-time = "2026-10-14T16:57:45.025Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/72/3abbedf533b9f543ff28a418c4ba3a27583a8213a20e1ca1f9da9b932317/mathema-0.6.3-py3-none-any.whl", hash = "sha256:b510da6e5f4e12e1b8a7a7910e7c13c055cd860b7bc336847dde52849132a5ac", size = 1745814, upload-time = "2026-10-31T10:18:25.523Z" },
 ]
 
 [[package]]
