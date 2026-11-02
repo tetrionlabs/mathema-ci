@@ -6,6 +6,8 @@ each worker is measured too: the lines only a worker ran reach
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import textwrap
 
 from mathema_ci.measure import parse_args, run_suite_under_coverage
@@ -72,3 +74,50 @@ def test_a_failing_suite_keeps_its_status_and_its_lines(tmp_path):
     root = _project(tmp_path, zero=1)
     assert run_suite_under_coverage(parse_args(ARGS), str(root)) == 1
     assert _executed(root) == {1, 2, 3, 4, 5, 6}
+
+
+SERIAL = ["--", "-q", "-p", "no:mathema", "-p", "no:cacheprovider", "-p", "no:xdist"]
+
+DIES = """\
+import os
+import signal
+
+
+def pytest_addoption(parser):
+    parser.addoption("--mathema-test-ledger")
+
+
+def pytest_configure(config):
+    os.kill(os.getpid(), signal.SIGKILL)
+"""
+
+
+def test_a_usage_error_leaves_the_last_report_alone(tmp_path):
+    root = _project(tmp_path)
+    assert run_suite_under_coverage(parse_args(SERIAL), str(root)) == 0
+    report = (root / "coverage.json").read_bytes()
+    args = parse_args([*SERIAL, "--no-such-option"])
+    assert run_suite_under_coverage(args, str(root)) == 4
+    assert (root / "coverage.json").read_bytes() == report
+    assert not list(root.glob(".coverage*"))
+
+
+def test_a_killed_pytest_leaves_the_last_report_alone(tmp_path):
+    root = _project(tmp_path)
+    assert run_suite_under_coverage(parse_args(SERIAL), str(root)) == 0
+    report = (root / "coverage.json").read_bytes()
+    (root / "conftest.py").write_text(DIES)
+    assert run_suite_under_coverage(parse_args(SERIAL), str(root)) == -9
+    assert (root / "coverage.json").read_bytes() == report
+    assert not list(root.glob(".coverage*"))
+
+
+def test_data_left_by_an_earlier_run_is_not_merged_in(tmp_path):
+    root = _project(tmp_path)
+    (root / "earlier.py").write_text("x = 1\n")
+    subprocess.run([sys.executable, "-m", "coverage", "run", "-p", "earlier.py"],
+                   cwd=root, check=True)
+    assert list(root.glob(".coverage.*"))
+    assert run_suite_under_coverage(parse_args(SERIAL), str(root)) == 0
+    files = json.loads((root / "coverage.json").read_text())["files"]
+    assert "signs.py" in files and "earlier.py" not in files

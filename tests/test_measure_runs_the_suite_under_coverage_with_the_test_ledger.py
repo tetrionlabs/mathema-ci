@@ -42,6 +42,13 @@ def test_an_unknown_measure_option_is_a_usage_error():
     assert caught.value.code == 2
 
 
+def test_the_help_says_measure_runs_verify_and_writes_the_records(capsys):
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "mathema's verify" in text and ".mathema/verified" in text
+
+
 def test_the_suite_runs_under_coverage_with_the_ledger_on():
     cmd = suite_command(parse_args(["--", "-q", "-n", "2"]))
     assert cmd[:6] == [sys.executable, "-m", "coverage", "run",

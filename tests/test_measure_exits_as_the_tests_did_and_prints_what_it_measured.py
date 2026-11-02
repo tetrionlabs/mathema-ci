@@ -15,6 +15,7 @@ from measure_fakes import (
     FakeSuite,
     FakeVerifier,
     Staging,
+    Verified,
 )
 
 from mathema_ci.measure import parse_args, run
@@ -51,6 +52,13 @@ def test_a_run_pytest_could_not_complete_measures_nothing(tmp_path, capsys):
         assert code == status
         assert scorer.calls == [] and reader.read_calls == []
         assert f"pytest exited {status}" in capsys.readouterr().err
+
+
+def test_a_pytest_killed_by_a_signal_measures_nothing(tmp_path, capsys):
+    code, _, reader, scorer = _run(tmp_path, [], status=-9)
+    assert code == 128 + 9
+    assert scorer.calls == [] and reader.read_calls == []
+    assert "pytest was killed by signal 9" in capsys.readouterr().err
 
 
 def test_the_triangle_the_numbers_and_the_coverage_line(tmp_path, capsys):
@@ -94,6 +102,7 @@ def test_stage_stages_then_verify_records_then_scoring_reads(tmp_path, capsys):
 
     def verify(root):
         order.append("verify")
+        return Verified()
 
     reader.stage = stage  # type: ignore[method-assign]
     _run(tmp_path, ["--stage"], reader=reader, scorer=score, verify=verify)

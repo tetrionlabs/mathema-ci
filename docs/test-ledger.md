@@ -37,7 +37,7 @@ per line, so a diff between two ledgers shows one changed line per
 changed test:
 
 ```json
-{"schema": 1, "class_excludes": ["execnet", "iniconfig", "pluggy", "pytest", "pytest-xdist"], "rows": [
+{"schema": 1, "class_excludes": ["execnet", "iniconfig", "pluggy", "pytest-xdist"], "rows": [
 {"class": "3f9a...", "environment": "ci", "files": [...], "fixtures": [...], "framework": "pytest", "identity": "a41c...", "n": 2, "nodeid": "tests/test_billing.py::test_discounted", "outcome": "passed", "points": "77e0..."}
 ]}
 ```
@@ -80,8 +80,10 @@ unrelated fixture in the same conftest does not (that edit shows in
 `files` instead).
 
 A fixture defined outside the rootdir (pytest's own `tmp_path`, a
-plugin's fixture) is listed by name with `path` and `digest` null,
-since its version is already part of the environment class. A direct
+plugin's fixture) is listed by name with `path` and `digest` null: its
+distribution's version belongs to the environment class, unless that
+distribution is one the class leaves out (`pytest-xdist`'s `worker_id`),
+and then no version of it is recorded. A direct
 `@pytest.mark.parametrize` argument is not listed as a fixture, its
 value being in `params`; an indirectly parametrized fixture is listed,
 and its value is in `params` as well. A fixture name with several
@@ -115,16 +117,17 @@ measuring the test session:
 
 | distribution | what it does |
 |---|---|
-| `pytest`, `pluggy`, `iniconfig` | pytest and its own plugin and configuration dependencies |
+| `pluggy`, `iniconfig` | pytest's own plugin and configuration dependencies |
 | `pytest-xdist`, `execnet` | run the tests in worker processes, and carry messages to them |
 | `coverage`, `pytest-cov` | measure the run |
 | `pytest-sugar`, `pytest-instafail`, `pytest-pretty`, `pytest-clarity` | change how results are shown |
 | `pytest-html`, `pytest-metadata`, `pytest-json-report`, `pytest-github-actions-annotate-failures` | report the results |
-| `mathema-ci` | writes this ledger |
+| `mathema-ci` | writes this ledger; with a population its wrappers also change function identity during the run (see below) |
 
 Every other distribution stays in, since its version can change what a
-test does. That includes a library a test computes with, Hypothesis among
-them, and every other `pytest-*` plugin: `pytest-randomly` reseeds `random`
+test does. That includes pytest itself, whose `approx`, `raises` and
+`tmp_path` run inside tests, a library a test computes with, Hypothesis
+among them, and every other `pytest-*` plugin: `pytest-randomly` reseeds `random`
 and reorders the tests, `pytest-rerunfailures` can change an outcome,
 `pytest-timeout` can fail a test that would have passed, `pytest-mock`
 replaces collaborators. A plugin this list does not know
@@ -132,7 +135,7 @@ therefore costs a spare class, and never lets two different environments
 share one.
 
 So a serial run and a pytest-xdist run of the same code share a class,
-and so do runs under different pytest versions. The names left out of
+and a pytest bump makes a new one. The names left out of
 this session's class are listed, sorted, in the ledger's `class_excludes`.
 
 ### n and points
@@ -145,7 +148,14 @@ wrapper (`functools.wraps`, so `__wrapped__` reaches the original) and
 points every reference to the original in a loaded module at the
 wrapper, a test module's `from calc import add` included. It installs
 no trace function, since coverage owns `sys.settrace`, and it puts every
-original back when the session ends.
+original back when the session ends. During the run a listed function is
+not the object its module defined, so a test comparing functions with
+`is`, or a mathema check run from inside a test that reads the function's
+form, can see the wrapper.
+
+On a suite of about 1,050 tests, the ledger with no population added no
+time beyond run-to-run noise. With a population of about 500 functions it
+added roughly 10 to 20 percent.
 
 A call is a direct point when it happens during the test's call phase
 and the calling code is in a collected test file. A call from inside

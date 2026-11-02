@@ -108,10 +108,25 @@ class FakeScorer:
         return self.scores
 
 
+@dataclass(frozen=True)
+class Verified:
+    """The fields of core's `VerifyResult` that `measure` reads."""
+    problems: tuple[str, ...] = ()
+    fresh: int = 2
+    adjudicated: int = 1
+    nothing_declared: bool = False
+
+
 @dataclass
 class FakeVerifier:
-    """Records each root it was asked to verify."""
+    """Records each root it was asked to verify, and answers with a fixed
+    result, or raises `raises` when one is given."""
+    result: Verified = Verified()
+    raises: Exception | None = None
     calls: list = field(default_factory=list)
 
     def __call__(self, root):
         self.calls.append(root)
+        if self.raises is not None:
+            raise self.raises
+        return self.result

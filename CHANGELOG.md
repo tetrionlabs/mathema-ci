@@ -6,14 +6,15 @@
   runs the project's tests under coverage with the test ledger on,
   streaming their output and exiting as they did; reads the claims the
   tests state and, with `--stage`, stages the ones mathema decides hold;
-  records the project's claims through `verify`, so staged claims count
-  towards clarity on the same run;
-  prints the triangle, the three numbers, an `implementation coverage:
-  N%` line for CI hosts that read coverage off the log, what was read or
-  staged and every finding; keeps a badges block current in the README
+  runs `verify`, which writes `.mathema/verified`, so staged claims count
+  towards clarity on the same run; prints the triangle, the three
+  numbers, an `implementation coverage: N%` line for CI hosts that read
+  coverage off the log, what `verify` found, what was read or staged and
+  every finding; keeps a badges block current in the README
   between `<!-- mathema:badges -->` markers; and with `--out` writes the
   badge artifacts. `--junit` keeps pytest's junit report; `--strict`
-  fails a passing run whose tests stated a claim mathema falsified.
+  fails a passing run whose tests stated a claim mathema falsified or
+  whose verify reported a problem.
 - Renders mathema's `BadgeScores` as the ASCII triangle, the SVG
   triangle card and the three shields, and writes them with a CI
   snapshot and a README block (whose images all load by URL, so it
@@ -28,7 +29,7 @@
   environment name and class, the digests of its source, fixtures and
   parametrize values, and the number of distinct points at which it
   called the project's indexed functions. The environment class leaves
-  out the distributions listed as running the tests (pytest, pytest-xdist,
+  out the distributions listed as running the tests (pluggy, pytest-xdist,
   execnet, coverage and the like), which the ledger lists in `class_excludes`, so
   parallel runs under pytest-xdist write the same rows as serial ones,
   class included. The schema is in

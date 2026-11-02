@@ -19,9 +19,11 @@ mathema-ci measure --out -- -n 2
 
 runs the project's tests under coverage with the test ledger on, reads
 the claims they state (`--stage` stages the ones mathema decides hold),
-scores the project, prints the triangle and the numbers, keeps the
-README block current, and exits as the tests did. Everything after `--`
-goes to pytest.
+runs mathema's `verify`, which writes `.mathema/verified`, scores the
+project, prints the triangle, the numbers and what `verify` found, keeps
+the README block current, and exits as the tests did. Everything after
+`--` goes to pytest. `--strict` also fails a passing run on a claim read
+from the tests that mathema falsified, or on a problem `verify` reported.
 
 The badge artifacts are written only with `--out`: `--out DIR` writes
 them to DIR, and `--out` with no directory writes them to

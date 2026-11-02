@@ -64,13 +64,14 @@ def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
 
 
 # Distributions whose purpose is to run, schedule, observe or measure a
-# test session: pytest with its own dependencies pluggy and iniconfig,
-# xdist's transport execnet, coverage, this ledger writer, and the pytest
-# plugins known to do only that. Everything else stays in the class, any
-# other `pytest-*` plugin included, so a plugin nobody has listed costs a
-# spare class and never a false match.
+# test session: pytest's own dependencies pluggy and iniconfig, xdist's
+# transport execnet, coverage, this ledger writer, and the pytest plugins
+# known to do only that. Everything else stays in the class: pytest
+# itself, whose `approx`, `raises` and `tmp_path` run inside tests, and
+# any other `pytest-*` plugin, so a plugin nobody has listed costs a spare
+# class and never a false match.
 TEST_RUNNER_DISTRIBUTIONS = frozenset({
-    "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci",
+    "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci",
     "pytest-xdist", "pytest-cov", "pytest-sugar",
     "pytest-html", "pytest-metadata", "pytest-instafail",
     "pytest-json-report", "pytest-pretty", "pytest-clarity",
