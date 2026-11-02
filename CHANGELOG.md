@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `mathema-ci measure` (and core's `mathema measure`, which calls it)
+  runs the project's tests under coverage with the test ledger on,
+  streaming their output and exiting as they did; reads the claims the
+  tests state and, with `--stage`, stages the ones mathema decides hold;
+  prints the triangle, the three numbers, an `implementation coverage:
+  N%` line for CI hosts that read coverage off the log, what was read or
+  staged and every finding; keeps a badges block current in the README
+  between `<!-- mathema:badges -->` markers; and with `--out` writes the
+  badge artifacts. `--junit` keeps pytest's junit report; `--strict`
+  fails a passing run whose tests stated a claim mathema falsified.
 - Renders mathema's `BadgeScores` as the ASCII triangle, the SVG
   triangle card and the three shields, and writes them with a CI
   snapshot and a README block (whose images all load by URL, so it

@@ -15,6 +15,13 @@ def test_the_parser_knows_measure():
     assert args.command == "measure"
 
 
-def test_measure_says_it_is_not_built_rather_than_pretending(capsys):
-    assert main(["measure"]) == 2
-    assert "not built yet" in capsys.readouterr().err
+def test_measure_hands_its_arguments_to_measure_main(monkeypatch):
+    seen = []
+
+    def fake(argv):
+        seen.append(argv)
+        return 7
+
+    monkeypatch.setattr("mathema_ci.measure.main", fake)
+    assert main(["measure", "--stage", "--", "-n", "2"]) == 7
+    assert seen == [["--stage", "--", "-n", "2"]]

@@ -11,24 +11,32 @@ This package renders and runs. The measurement itself is mathema's.
 Status: not released. The package name is reserved; the first release
 is 0.1.
 
-## What it will do
+## measure
 
 ```
-mathema-ci measure --out mathema-report -- -n 2
+mathema-ci measure --out -- -n 2
 ```
 
-runs the project's tests under coverage with the test ledger on, scores
-the project, writes the triangle and the report page to the output
-directory, keeps the README block current, prints the numbers, and exits
-as the tests did.
+runs the project's tests under coverage with the test ledger on, reads
+the claims they state (`--stage` stages the ones mathema decides hold),
+scores the project, prints the triangle and the numbers, keeps the
+README block current, writes the badge artifacts to the output directory
+(`.mathema/badges/` by default), and exits as the tests did. Everything
+after `--` goes to pytest.
+
+The README block sits between two `<!-- mathema:badges -->` markers.
+The first run puts it after the README's first level-one heading; later
+runs rewrite only what is between the markers. `--no-readme` leaves the
+README alone and `--readme PATH` keeps the block in another file.
 
 ## Layout
 
 - `src/mathema_ci/`: the `measure` command, the artifact writers, the
   report page, the README block, the pipeline templates. Today it holds
-  `render.render_triangle`, `render.render_svg`, `render.shields_payloads`,
-  `artifacts.write_badges`, `artifacts.ci_snapshot`,
-  `artifacts.readme_snippet` and `templates.write_ci_templates`.
+  `measure.main`, `render.render_triangle`, `render.render_svg`,
+  `render.shields_payloads`, `artifacts.write_badges`,
+  `artifacts.ci_snapshot`, `artifacts.readme_snippet`,
+  `readme.readme_block` and `templates.write_ci_templates`.
 - `src/mathema_pytest/`: the pytest plugin that writes the test ledger,
   one row per test, described in [docs/test-ledger.md](docs/test-ledger.md).
   It imports nothing from mathema, since it runs inside the measured

@@ -533,7 +533,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", specifier = ">=7" },
+    { name = "coverage", specifier = ">=7.10" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
     { name = "mathema", specifier = ">=0.6.2,<0.7" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },

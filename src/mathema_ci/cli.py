@@ -5,8 +5,8 @@
 `mathema-ci measure` is the one CI stage: it runs the project's tests
 under coverage with the run ledger on, scores the project through
 mathema, writes the artifacts and the report page, keeps the README
-block current, and exits as the tests did. Until core's own `mathema
-measure` delegates here, this console script is the entry point.
+block current, and exits as the tests did. Core's `mathema measure`
+calls the same `mathema_ci.measure.main`.
 """
 from __future__ import annotations
 
@@ -34,13 +34,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Intent:
-        Parse the arguments and dispatch; `measure` is not built yet, so
-        it says so and exits 2 rather than pretending to have run.
+        Parse the arguments and dispatch; `measure` hands every argument
+        after its name to `mathema_ci.measure.main`, which parses its
+        own options and passes those after `--` to pytest.
     """
-    args = build_parser().parse_args(argv)
-    if args.command == "measure":
-        print("mathema-ci measure is not built yet", file=sys.stderr)
-        return 2
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["measure"]:
+        from . import measure
+        return measure.main(argv[1:])
+    build_parser().parse_args(argv)
     build_parser().print_help()
     return 0
 

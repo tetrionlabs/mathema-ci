@@ -16,7 +16,7 @@ authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # core's public API (repo_badges, BadgeScores, project_coverage) is the
 # contract; it moves on minor releases, so the range stops before the
 # next one. coverage is what measure runs the suite under.
-dependencies = ["mathema>=0.6.2,<0.7", "pyyaml>=6", "coverage>=7"]
+dependencies = ["mathema>=0.6.2,<0.7", "pyyaml>=6", "coverage>=7.10"]
 keywords = ["mathema", "continuous-integration", "code-coverage",
             "claim-driven-development", "github-actions", "gitlab-ci",
             "pytest-plugin", "software-verification"]
