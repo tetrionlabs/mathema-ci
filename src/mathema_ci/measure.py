@@ -2,20 +2,22 @@
 # Copyright 2026 Tetrion Ltd
 """`measure`: the project's tests, then its triangle, from one command.
 
-    mathema measure [--out [DIR]] [--stage] [--no-readme] [--readme PATH]
-                    [--junit PATH] [--strict] [-- PYTEST_ARGS]
+    mathema-ci measure [--out [DIR]] [--stage] [--no-readme] [--readme PATH]
+                       [--junit PATH] [-- PYTEST_ARGS]
 
 In order: the suite runs as `coverage run -m pytest` with the test ledger
 on, its output streamed and its exit status kept; the claims the tests
 state are read, and with `--stage` decided and the ones that hold
 staged; mathema's `verify` decides the project's claims and writes
 `.mathema/verified`, the staged claims among them, so that scoring reads
-them; the project is scored; the triangle, the three numbers, the
-`implementation coverage: N%` line, what verify found, what was read or
-staged and every finding are printed; the README block is kept current;
-with `--out` the badge artifacts are written. The command exits as the
-tests did, or 1 under `--strict` when the tests passed and a claim read
-from them was falsified, verify reported a problem, or verify stopped.
+them; the project is scored; the triangle, what is known about the code,
+what was read from the tests and what to check are printed; the README
+block is kept current; with `--out` the badge files are written.
+
+`measure` measures and is not a verification step. It exits as the tests
+did, whatever verify found and whatever failed after the tests; problems
+are printed with a pointer to `mathema verify`, which is the gate. Only a
+pytest run that did not complete measures nothing.
 
 The project is the current directory. Everything after `--` goes to
 pytest unchanged.
@@ -23,22 +25,41 @@ pytest unchanged.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Protocol
 
 from mathema.badges import BadgeScores
 
 from .artifacts import DEFAULT_BADGE_DIR, write_badges
-from .core_tests import Reader, Reading, Staging, core_reader
-from .readme import MARKER, PLACEHOLDER_BASE, badges_base, place_block, readme_block
+from .core_tests import (
+    READER_VERSION,
+    Claim,
+    Reader,
+    Reading,
+    Staging,
+    core_reader,
+    statement_notes,
+    window_words,
+)
+from .readme import (
+    MARKER_START,
+    PLACEHOLDER_BASE,
+    badges_base,
+    marker_problem,
+    place_block,
+    readme_block,
+)
 from .render import render_triangle
 
-__all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "main", "parse_args",
-           "run", "suite_command"]
+__all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "main",
+           "modules_in_report", "parse_args", "project_function_key", "run",
+           "suite_command"]
 
 LEDGER_OPTION = "--mathema-test-ledger"
 LEDGER_PATH = ".mathema/tests/ledger.json"
@@ -46,6 +67,12 @@ LEDGER_PATH = ".mathema/tests/ledger.json"
 # pytest's exit statuses for a run that did not complete: interrupted,
 # internal error, usage error. Nothing was measured, so nothing is scored.
 _INCOMPLETE = (2, 3, 4)
+
+# Each score and what it means to someone reading it for the first time.
+_SCORES = (("implementation", "lines your tests, probes or proofs ran"),
+           ("intent", "docstring statements a claim checks"),
+           ("clarity", "how much of each function's behaviour is known"),
+           ("overall", "the three together"))
 
 
 class Verified(Protocol):
@@ -79,7 +106,6 @@ class Options:
     write_readme: bool = True
     readme: str = "README.md"
     junit: str | None = None
-    strict: bool = False
     pytest_args: list[str] = field(default_factory=list)
 
 
@@ -88,13 +114,13 @@ def _parser() -> argparse.ArgumentParser:
         The parser for `measure`'s own options, those before `--`.
     """
     p = argparse.ArgumentParser(
-        prog="mathema measure",
+        prog="mathema-ci measure",
         usage="%(prog)s [options] [-- PYTEST_ARGS]",
         description="Run the project's tests under coverage with the test "
                     "ledger on, run mathema's verify (which writes "
                     ".mathema/verified), score the project, print the "
                     "triangle and keep the README block current. Exits as "
-                    "the tests did.")
+                    "the tests did; mathema verify is the gate for claims.")
     p.add_argument("--out", nargs="?", const=DEFAULT_BADGE_DIR, default=None,
                    metavar="DIR",
                    help="write the badge artifacts to DIR "
@@ -109,10 +135,6 @@ def _parser() -> argparse.ArgumentParser:
                         "(default README.md)")
     p.add_argument("--junit", default=None, metavar="PATH",
                    help="also write pytest's junit report to PATH")
-    p.add_argument("--strict", action="store_true",
-                   help="exit 1 when the tests passed but a claim read "
-                        "from them was falsified, verify reported a "
-                        "problem, or verify stopped")
     return p
 
 
@@ -127,7 +149,7 @@ def parse_args(argv: list[str]) -> Options:
         own, rest = argv, []
     ns = _parser().parse_args(own)
     return Options(out=ns.out, stage=ns.stage, write_readme=ns.write_readme,
-                   readme=ns.readme, junit=ns.junit, strict=ns.strict,
+                   readme=ns.readme, junit=ns.junit,
                    pytest_args=list(rest))
 
 
@@ -274,6 +296,60 @@ def paths_to_read(pytest_args: list[str], root: str) -> list[str]:
     return ["."]
 
 
+def modules_in_report(files: Iterable[str]) -> list[str]:
+    """The dotted modules of the files a coverage report measured, sorted
+    by path: the project's own Python files, with a leading `src/` dropped,
+    and neither test files nor files outside the project."""
+    modules = []
+    for name in sorted(files):
+        path = PurePosixPath(name.replace(os.sep, "/"))
+        parts = list(path.parts)
+        if path.is_absolute() or path.suffix != ".py" or ".." in parts:
+            continue
+        if parts[0] == "src":
+            parts = parts[1:]
+        parts[-1] = path.stem
+        if (any(p in ("test", "tests") for p in parts[:-1])
+                or path.stem == "conftest" or path.stem.startswith("test_")
+                or path.stem.endswith("_test")):
+            continue
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if parts and all(p.isidentifier() for p in parts):
+            modules.append(".".join(parts))
+    return modules
+
+
+def project_function_key(root: str) -> str | None:
+    """The dotted key of a public function of the project, the first one
+    mathema finds in the modules `coverage.json` measured, or None when
+    the report is missing or none is found."""
+    try:
+        with open(os.path.join(root, "coverage.json"), encoding="utf-8") as fh:
+            files = json.load(fh)["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    from mathema.audit import discover
+
+    _importable(root)
+    for module in modules_in_report(files):
+        try:
+            keys = discover([module])
+        except Exception:
+            continue
+        for key in sorted(keys):
+            if not any(part.startswith("_") for part in key.split(".")):
+                return key
+    return None
+
+
+def _in_plain_words(exc: Exception) -> str:
+    """Intent:
+        An exception as `TypeName: message`, to quote in a line of output.
+    """
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _pct(value: int | None) -> str:
     """Intent:
         A score as `N%`, or `unknown`.
@@ -289,96 +365,189 @@ def _plural(n: int, one: str, many: str) -> str:
 
 
 def score_lines(scores: BadgeScores) -> list[str]:
-    """The triangle, the three numbers with the overall, and the
-    `implementation coverage: N%` line a CI host reads coverage from."""
-    return [render_triangle(scores.implementation, scores.intent,
-                            scores.clarity),
-            "",
-            f"implementation {_pct(scores.implementation)}   "
-            f"intent {_pct(scores.intent)}   clarity {_pct(scores.clarity)}   "
-            f"overall {_pct(scores.overall)}",
-            f"implementation coverage: {_pct(scores.implementation)}"]
+    """The four scores under their heading, each with what it means, the
+    values in a column as wide as the widest."""
+    values = {name: _pct(getattr(scores, name)) for name, _ in _SCORES}
+    width = max(3, *(len(v) for v in values.values()))
+    return ["What is known about your code"] + [
+        f"  {name:<14}   {values[name]:<{width}}   {gloss}"
+        for name, gloss in _SCORES]
 
 
-def verify_lines(verified: Verified | None, stopped: str | None) -> list[str]:
-    """What the sweep found, since the scores rest on it: why it stopped,
-    that nothing is declared, or its counts and every problem."""
+def check_lines(verified: Verified | None, stopped: str | None) -> list[str]:
+    """What to check before relying on the scores: the problems verify
+    found, counted, or that it stopped, each with the command that shows
+    more. Empty when there is nothing to check."""
     if verified is None:
-        return [f"verify: stopped ({stopped}); the numbers above rest on the "
-                "records as they were"]
-    if verified.nothing_declared:
-        return ["verify: nothing declared yet (no .mathema/verified or claim "
-                "files), so the numbers above rest on no claims"]
-    count = len(verified.problems)
-    line = (f"verify: {verified.fresh} unchanged since the last run (not run "
-            f"again), {verified.adjudicated} checked, "
-            f"{_plural(count, 'problem', 'problems')}")
-    if count:
-        line += f"; the numbers above rest on {'it' if count == 1 else 'them'}"
-    return [line] + ["  " + str(p).replace("\n", "\n  ")
-                     for p in verified.problems]
+        said = (f"the check of your claims stopped ({stopped}), so these "
+                "numbers use its last results; to see why: mathema verify")
+    elif verified.problems:
+        count = len(verified.problems)
+        said = (f"{_plural(count, 'problem', 'problems')} in your claims; to "
+                f"see {'it' if count == 1 else 'them'}: mathema verify")
+    else:
+        return []
+    return ["Check before relying on these numbers", "  " + said]
 
 
-def tests_lines(reading: Reading | None, staging: Staging | None,
-                root: str) -> list[str]:
-    """What was read from the tests, or staged from them, then every
-    finding with its witness, the assertion it was read from and the
-    command that accepts it if the test is right."""
-    if reading is None:
-        return ["read from tests: not available, this mathema has no "
-                "claims_from_tests"]
-    refused = _plural(len(reading.refusals), "assertion not read as a claim",
-                      "assertions not read as claims")
-    if staging is None:
-        return [f"read from tests: {_plural(len(reading.claims), 'claim', 'claims')}"
-                f", {refused}; --stage decides them and stages the ones "
-                "that hold"]
-    path = staging.path
-    if os.path.isabs(path):
-        path = os.path.relpath(path, root)
-    lines = [f"staged: {_plural(len(staging.staged), 'claim', 'claims')} in "
-             f"{path}; {refused}"]
-    if staging.gone:
-        lines.append(f"no longer read from its test: {len(staging.gone)}")
-    if staging.undecided:
-        lines.append(f"neither held nor falsified: {len(staging.undecided)}")
-    if staging.findings:
-        lines.append(f"findings: {len(staging.findings)}")
-    for f in staging.findings:
-        lines.append(f"finding: {f.claim.key}: {f.claim.law} is falsified")
-        lines.append(f"  witness: {f.witness}")
-        for origin in f.claim.inferred_from:
-            lines.append(f"  read from: {origin}")
-        lines.append(f"  if the test is right: {f.accept_command}")
+def begin_line(reading: Reading | None, key: str | None) -> str:
+    """The line for a project with no claims, with a command that works on
+    this mathema: read the claims of a function the tests already state
+    claims about, else ask for suggestions about a function of the project,
+    `key` when one is known."""
+    if reading is not None and reading.claims:
+        command = f"mathema claims {reading.claims[0].key} --from-tests"
+    else:
+        command = f"mathema claims {key or 'your_module.your_function'} --suggest"
+    return f"No claims yet, so intent and clarity start at 0. To begin: {command}"
+
+
+def reading_lines(reading: Reading) -> list[str]:
+    """How many claims were read from the tests and how many assertions
+    were not, each left out at zero, and how to go on from the claims."""
+    counts = []
+    if reading.claims:
+        counts.append(_plural(len(reading.claims), "claim read", "claims read"))
+    if reading.refusals:
+        counts.append(_plural(len(reading.refusals),
+                              "assertion could not be read as a claim",
+                              "assertions could not be read as claims"))
+    lines = ["  " + "; ".join(counts)] if counts else []
+    if reading.claims:
+        lines.append("  to check them and keep the ones that hold: "
+                     "mathema measure --stage")
     return lines
 
 
-def _update_readme(options: Options, root: str, base: str) -> str:
+def _source_place(origin: str) -> str:
     """Intent:
-        Keep the README block current in `options.readme` and say what
-        was done: inserted, rewritten, unchanged, or why nothing was
-        written.
+        An assertion's `path::test:line` as `path:line`.
+    """
+    place, _, line = origin.rpartition(":")
+    return f"{place.split('::')[0]}:{line}"
+
+
+def staging_lines(staging: Staging, *, root: str, counted: bool,
+                  window: str | None,
+                  notes: Callable[[Claim], Sequence[str]]) -> list[str]:
+    """What became of the claims read: those that hold and how to adopt
+    them, each false test with what its function gives and where the test
+    is, those not decided and those gone. Zero counts are left out.
+    `counted` says verify recorded the staged claims, `window` how long
+    they have waited, and `notes` gives a finding's further lines."""
+    path = staging.path
+    if os.path.isabs(path):
+        path = os.path.relpath(path, root)
+    lines = []
+    held = len(staging.staged)
+    if held:
+        one = held == 1
+        kept = (f"  {held} {'holds and is' if one else 'hold and are'} kept in "
+                f"{path}")
+        if counted:
+            kept += f"; {'it counts' if one else 'they count'} above"
+        adopt = f"  to adopt {'it' if one else 'them'}: mathema accept --staged"
+        if window:
+            adopt += f"   ({window})"
+        lines += [kept, adopt]
+    if staging.findings:
+        count = len(staging.findings)
+        lines.append("  " + _plural(count, "test states", "tests state")
+                     + " something false:")
+    for f in staging.findings:
+        places = ", ".join(_source_place(o) for o in f.claim.inferred_from)
+        lines.append(f"    {f.claim.key}: {f.claim.law}")
+        lines.append(f"    {f.witness}  ({places})")
+        lines += [f"    {note}" for note in notes(f.claim)]
+        lines.append(f"    if the test is right: {f.accept_command}")
+    if staging.undecided:
+        lines.append(f"  {len(staging.undecided)} could not be decided")
+    if staging.gone:
+        count = len(staging.gone)
+        lines.append(f"  {count} {'is' if count == 1 else 'are'} no longer in "
+                     "your tests")
+    return lines
+
+
+def _update_readme(options: Options, root: str, base: str) -> str | None:
+    """Intent:
+        Keep the README block current in `options.readme` and the line that
+        says what was done: added, updated or why nothing was, and no line
+        when it was already current.
     """
     rel = options.readme
     path = rel if os.path.isabs(rel) else os.path.join(root, rel)
-    if not os.path.isfile(path):
-        return f"README block: no {rel}, nothing written"
-    with open(path, encoding="utf-8") as fh:
-        text = fh.read()
-    new = place_block(text, readme_block(base))
-    if new is None:
-        return (f"README block: {rel} has {text.count(MARKER)} {MARKER} "
-                "markers, not 2; left unchanged")
-    if new == text:
-        said = f"README block: unchanged in {rel}"
-    else:
+    if not os.path.exists(path):
+        return f"README: no {rel}, so no badges block"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        problem = marker_problem(text)
+        if problem is not None:
+            return f"README: left alone, it {problem}"
+        new = place_block(text, readme_block(base))
+        if new == text:
+            return None
+        assert new is not None
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(new)
-        said = (f"README block: {'rewritten' if MARKER in text else 'inserted'}"
-                f" in {rel}")
+    except (OSError, ValueError) as exc:
+        return f"README: could not be read or written ({_in_plain_words(exc)})"
+    done = "updated" if MARKER_START in text else "added"
+    said = f"README: {done} the badges block"
     if base == PLACEHOLDER_BASE:
-        said += "; substitute OWNER/REPO in its image URLs"
+        said += "; replace OWNER/REPO in its links with your repository"
     return said
+
+
+def _write_badge_files(scores: BadgeScores | None, out: str, root: str) -> list[str]:
+    """Intent:
+        Write the badge files to `out` and the lines that say so, or the
+        line that says why they were not written.
+    """
+    if scores is None:
+        return ["no badge files written, there are no scores"]
+    out_dir = out if os.path.isabs(out) else os.path.join(root, out)
+    try:
+        written, pruned = write_badges(scores, out_dir)
+    except OSError as exc:
+        return [f"badge files could not be written ({_in_plain_words(exc)})"]
+    return ([f"{len(written)} badge files written to {out}"]
+            + [f"removed an old badge file: {os.path.relpath(p, out_dir)}"
+               for p in pruned])
+
+
+def _read_and_stage(options: Options, reader: Reader, root: str
+                    ) -> tuple[Reading | None, Staging | None, list[str]]:
+    """Intent:
+        The claims read from the tests, what became of them under
+        `--stage`, and a line for each step that raised.
+    """
+    try:
+        reading = reader.read_tests(paths_to_read(options.pytest_args, root),
+                                    root=root)
+    except Exception as exc:
+        return None, None, [f"  your tests could not be read ({_in_plain_words(exc)})"]
+    if not options.stage:
+        return reading, None, []
+    try:
+        return reading, reader.stage(reading, root=root), []
+    except Exception as exc:
+        return reading, None, ["  the claims read could not be checked "
+                               f"({_in_plain_words(exc)})"]
+
+
+def _notes_of(reader: Reader | None) -> Callable[[Claim], Sequence[str]]:
+    """Intent:
+        A function giving the lines `reader` adds to a finding, or none
+        when it raises.
+    """
+    def notes(claim: Claim) -> Sequence[str]:
+        try:
+            return statement_notes(reader, claim)
+        except Exception:
+            return ()
+    return notes
 
 
 def run(options: Options, *, root: str,
@@ -386,13 +555,15 @@ def run(options: Options, *, root: str,
         reader: Reader | None,
         verify: Callable[[str], Verified],
         score: Callable[[str], BadgeScores],
-        remote: Callable[[str], str | None]) -> int:
+        remote: Callable[[str], str | None],
+        function_key: Callable[[str], str | None]) -> int:
     """`measure` with its effects passed in: `run_suite` runs the tests
     and returns pytest's exit status, `reader` reads and stages claims
     from them (None when mathema has none), `verify` records the
     project's claims and returns what it found, `score` scores the
-    project and `remote` names its git remote. Returns the exit status:
-    128 plus the signal when a signal killed pytest."""
+    project, `remote` names its git remote and `function_key` names one
+    of its functions. Returns the tests' exit status, whatever was found
+    or failed after them: 128 plus the signal when a signal killed pytest."""
     status = run_suite(options, root)
     if incomplete(status):
         said = (f"pytest was killed by signal {-status}" if status < 0
@@ -400,43 +571,68 @@ def run(options: Options, *, root: str,
         print(f"measure: {said} before the tests completed; nothing measured",
               file=sys.stderr)
         return 128 - status if status < 0 else status
+
     reading = staging = None
+    trouble: list[str] = []
     if reader is not None:
-        reading = reader.read_tests(paths_to_read(options.pytest_args, root),
-                                    root=root)
-        if options.stage:
-            staging = reader.stage(reading, root=root)
+        reading, staging, trouble = _read_and_stage(options, reader, root)
+
     verified: Verified | None = None
     stopped = None
     try:
         verified = verify(root)
     except Exception as exc:
-        stopped = f"{type(exc).__name__}: {exc}"
-    scores = score(root)
-    lines = (score_lines(scores) + verify_lines(verified, stopped) + [""]
-             + tests_lines(reading, staging, root))
+        stopped = _in_plain_words(exc)
+
+    scores: BadgeScores | None = None
+    unscored = None
+    try:
+        scores = score(root)
+    except Exception as exc:
+        unscored = _in_plain_words(exc)
+
+    sections: list[list[str]] = []
+    if scores is not None:
+        sections.append([render_triangle(scores.implementation, scores.intent,
+                                         scores.clarity)])
+        sections.append(score_lines(scores))
+    else:
+        sections.append(["What is known about your code",
+                         f"  could not be worked out ({unscored})"])
+    if verified is not None and verified.nothing_declared:
+        sections.append([begin_line(reading, function_key(root))])
+    if reader is None:
+        sections.append([f"This mathema cannot read claims from your tests; "
+                         f"mathema {READER_VERSION} or later can."])
+    else:
+        claims = list(trouble)
+        if staging is not None:
+            claims = staging_lines(
+                staging, root=root, counted=verified is not None,
+                window=window_words(verified), notes=_notes_of(reader))
+        elif reading is not None and not options.stage:
+            claims = reading_lines(reading)
+        if claims:
+            sections.append(["Claims read from your tests", *claims])
+    sections.append(check_lines(verified, stopped))
+
+    closing: list[str] = []
     if options.write_readme:
-        lines.append(_update_readme(options, root,
-                                    badges_base(remote(root))))
+        line = _update_readme(options, root, badges_base(remote(root)))
+        if line is not None:
+            closing.append(line)
     if options.out is not None:
-        out_dir = (options.out if os.path.isabs(options.out)
-                   else os.path.join(root, options.out))
-        written, pruned = write_badges(scores, out_dir)
-        lines.append(f"wrote {len(written)} artifacts to {options.out}")
-        lines += [f"pruned stale badge artifact: {os.path.relpath(p, out_dir)}"
-                  for p in pruned]
-    print("\n".join(lines))
-    if status == 0 and options.strict and (
-            (staging is not None and staging.findings)
-            or verified is None or verified.problems):
-        return 1
+        closing += _write_badge_files(scores, options.out, root)
+    sections.append(closing)
+
+    print("\n\n".join("\n".join(s) for s in sections if s))
     return status
 
 
 def main(argv: list[str]) -> int:
-    """`mathema measure` on the project in the current directory, with
+    """`mathema-ci measure` on the project in the current directory, with
     the arguments that follow the command name."""
     return run(parse_args(argv), root=os.getcwd(),
                run_suite=run_suite_under_coverage, reader=core_reader(),
                verify=verify_project, score=score_project,
-               remote=origin_remote)
+               remote=origin_remote, function_key=project_function_key)

@@ -8,16 +8,23 @@ stages the ones mathema decides hold. Both are core's work, in
 that module, and it describes the shapes `measure` relies on as
 protocols, so `measure` runs against any object with those attributes.
 A mathema without `claims_from_tests` gives no reader, and `measure`
-then scores without reading the tests.
+then scores without reading the tests and says which version can.
 """
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable
 from typing import Protocol
 
-__all__ = ["Claim", "Finding", "Reader", "Reading", "Refusal", "Staging",
-           "core_reader"]
+__all__ = ["READER_VERSION", "Claim", "Finding", "Reader", "Reading", "Refusal",
+           "Staging", "core_reader", "statement_notes", "window_words"]
+
+# The first mathema release that reads claims from tests.
+READER_VERSION = "0.6.4"
+
+# The numbers in the line mathema's verify writes about staged claims.
+_WINDOW = re.compile(r"(\d+ of \d+ \w+)(?:, (\d+ past the window))?")
 
 
 class Claim(Protocol):
@@ -101,3 +108,23 @@ def core_reader() -> Reader | None:
     except ImportError:
         return None
     return claims_from_tests  # type: ignore[no-any-return,unused-ignore]
+
+
+def statement_notes(reader: object, claim: Claim) -> tuple[str, ...]:
+    """The lines `reader` gives for a claim whose test ran earlier
+    statements, through its `earlier_statement_notes`; none when it has
+    no such function."""
+    notes = getattr(reader, "earlier_statement_notes", None)
+    return tuple(notes(claim)) if notes is not None else ()
+
+
+def window_words(verified: object) -> str | None:
+    """How long the oldest staged claim has waited, in words, from the
+    `staged` line of mathema's verify result; None when the result has no
+    such line or the line holds no numbers."""
+    line = getattr(verified, "staged", None)
+    found = _WINDOW.search(line) if line else None
+    if found is None:
+        return None
+    past = f", {found.group(2)}" if found.group(2) else ""
+    return f"the oldest has waited {found.group(1)}{past}"

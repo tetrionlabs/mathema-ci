@@ -13,8 +13,8 @@ from mathema_ci.measure import LEDGER_OPTION, LEDGER_PATH, parse_args, suite_com
 
 
 def test_options_before_the_separator_are_measures_and_after_are_pytests():
-    opts = parse_args(["--stage", "--strict", "--", "-n", "2", "--stage"])
-    assert opts.stage and opts.strict
+    opts = parse_args(["--stage", "--", "-n", "2", "--stage"])
+    assert opts.stage
     assert opts.pytest_args == ["-n", "2", "--stage"]
 
 
@@ -22,7 +22,7 @@ def test_the_defaults_write_the_readme_and_no_artifacts():
     opts = parse_args([])
     assert opts.readme == "README.md" and opts.write_readme
     assert opts.out is None and opts.junit is None
-    assert not opts.stage and not opts.strict
+    assert not opts.stage
     assert opts.pytest_args == []
 
 
@@ -40,6 +40,23 @@ def test_an_unknown_measure_option_is_a_usage_error():
     with pytest.raises(SystemExit) as caught:
         parse_args(["-n", "2"])
     assert caught.value.code == 2
+
+
+def test_there_is_no_strict_option(capsys):
+    with pytest.raises(SystemExit) as caught:
+        parse_args(["--strict"])
+    assert caught.value.code == 2
+    assert "--strict" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    assert "--strict" not in capsys.readouterr().out
+
+
+def test_the_help_names_the_gate(capsys):
+    with pytest.raises(SystemExit):
+        parse_args(["--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "Exits as the tests did" in text and "mathema verify" in text
 
 
 def test_the_help_says_measure_runs_verify_and_writes_the_records(capsys):

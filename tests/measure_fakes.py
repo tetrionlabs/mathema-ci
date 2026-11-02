@@ -57,7 +57,7 @@ ROUNDED = InferredClaim(
     law="rounded(2.5) == 3",
     inferred_from=("tests/test_billing.py::test_rounded:12",))
 WRONG = Finding(claim=ROUNDED, witness="rounded(2.5) == 2",
-                accept_command="mathema accept billing.rounded test_rounded_1")
+                accept_command="mathema accept --staged")
 READING = Reading(claims=(DISCOUNTED, ROUNDED),
                   refusals=(Refusal("tests/test_billing.py::test_db", 20,
                                     "calls no function under the root"),))
@@ -115,6 +115,7 @@ class Verified:
     fresh: int = 2
     adjudicated: int = 1
     nothing_declared: bool = False
+    staged: str | None = None
 
 
 @dataclass
