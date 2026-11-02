@@ -54,3 +54,14 @@ def test_the_former_option_name_is_gone(pytester):
     result = pytester.runpytest_subprocess("--mathema-ledger")
     assert result.ret != 0
     assert "unrecognized arguments: --mathema-ledger" in result.stderr.str()
+
+
+def test_the_former_environment_variable_turns_nothing_on(pytester, monkeypatch):
+    monkeypatch.delenv("MATHEMA_TEST_LEDGER", raising=False)
+    monkeypatch.setenv("MATHEMA_LEDGER", "1")
+    pytester.makepyfile("def test_one():\n    assert True\n")
+    markers = pytester.runpytest_subprocess("--markers")
+    assert "mathema_test_ledger" not in markers.stdout.str()
+    result = pytester.runpytest_subprocess()
+    result.assert_outcomes(passed=1)
+    assert not (pytester.path / ".mathema").exists()

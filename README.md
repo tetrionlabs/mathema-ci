@@ -20,9 +20,12 @@ mathema-ci measure --out -- -n 2
 runs the project's tests under coverage with the test ledger on, reads
 the claims they state (`--stage` stages the ones mathema decides hold),
 scores the project, prints the triangle and the numbers, keeps the
-README block current, writes the badge artifacts to the output directory
-(`.mathema/badges/` by default), and exits as the tests did. Everything
-after `--` goes to pytest.
+README block current, and exits as the tests did. Everything after `--`
+goes to pytest.
+
+The badge artifacts are written only with `--out`: `--out DIR` writes
+them to DIR, and `--out` with no directory writes them to
+`.mathema/badges/`. Without `--out` no artifact is written.
 
 The README block sits between two `<!-- mathema:badges -->` markers.
 The first run puts it after the README's first level-one heading; later

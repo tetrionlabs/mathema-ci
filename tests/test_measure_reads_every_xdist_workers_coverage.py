@@ -35,8 +35,8 @@ def test_zero():
     assert sign(0) == {zero}
 """
 
-# the project stands in for the ledger plugin with an option of the same
-# name, so the run does not depend on the installed plugin's version
+# the project's conftest declares the test ledger option itself; the
+# installed plugin is switched off with `-p no:mathema`
 CONFTEST = """\
 def pytest_addoption(parser):
     parser.addoption("--mathema-test-ledger")
