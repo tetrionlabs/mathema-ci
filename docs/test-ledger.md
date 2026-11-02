@@ -115,13 +115,28 @@ test session rather than to be called by the code or its tests:
 
 - `pytest`, and its own dependencies `pluggy` and `iniconfig`;
 - every `pytest-*` distribution, a pytest plugin by pytest's naming
-  convention (`pytest-xdist`, `pytest-cov`, `pytest-timeout`, ...);
+  convention (`pytest-xdist`, `pytest-cov`, `pytest-timeout`, ...),
+  apart from the plugins listed below;
 - `execnet`, pytest-xdist's transport to its workers;
 - `coverage`, which measures the run;
 - `mathema-ci`, which writes this ledger.
 
 A library a test computes with stays in, Hypothesis among them, since
-its version can change what the test does. So a serial run and a
+its version can change what the test does. So do the `pytest-*` plugins
+that change what a test does, whichever session they load in:
+
+| plugin | what it changes |
+|---|---|
+| `pytest-randomly` | reseeds `random` for each test and reorders the tests |
+| `pytest-random-order` | reorders the tests |
+| `pytest-repeat`, `pytest-flakefinder` | run a test several times |
+| `pytest-rerunfailures` | reruns a failed test, so its outcome can change |
+| `pytest-env` | sets environment variables the code reads |
+| `pytest-mock` | replaces collaborators through its `mocker` fixture |
+| `pytest-asyncio` | supplies the event loop async tests run on |
+| `pytest-freezer`, `pytest-freezegun` | fix the time the code reads |
+
+A plugin not in that table is left out by its name. So a serial run and a
 pytest-xdist run of the same code share a class, and so do runs under
 different pytest versions. The names left out of this session's class
 are listed, sorted, in the ledger's `class_excludes`.

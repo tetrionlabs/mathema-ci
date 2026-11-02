@@ -83,3 +83,25 @@ def _ledger_one(pytester, *args):
         *args)
     result.assert_outcomes(passed=1)
     return json.loads((pytester.path / "out" / "ledger.json").read_text())
+
+
+BEHAVIOUR_PLUGINS = {
+    "pytest-randomly": "3.16.0", "pytest-random-order": "1.1.1",
+    "pytest-repeat": "0.9.4", "pytest-rerunfailures": "16.0",
+    "pytest-flakefinder": "1.1.0", "pytest-env": "1.1.5",
+    "pytest-mock": "3.15.0", "pytest-asyncio": "1.2.0",
+    "pytest-freezer": "0.4.9", "pytest-freezegun": "0.4.2"}
+
+
+def test_a_plugin_that_changes_what_a_test_does_stays_in():
+    kept, excluded = class_distributions({**LOADED, **BEHAVIOUR_PLUGINS})
+    assert BEHAVIOUR_PLUGINS.items() <= kept.items()
+    assert not set(BEHAVIOUR_PLUGINS) & set(excluded)
+    assert "pytest-xdist" in excluded and "pytest-cov" in excluded
+
+
+def test_a_behaviour_plugin_version_moves_the_class():
+    with_randomly = {**LOADED, "pytest-randomly": "3.16.0"}
+    bumped = {**LOADED, "pytest-randomly": "3.17.0"}
+    assert (environment_class(class_distributions(bumped)[0])
+            != environment_class(class_distributions(with_randomly)[0]))

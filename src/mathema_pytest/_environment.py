@@ -67,11 +67,20 @@ def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
 # test session: pytest with its own dependencies pluggy and iniconfig,
 # xdist's transport execnet, coverage, and this ledger writer. Every
 # `pytest-*` distribution is a pytest plugin by the naming convention
-# pytest documents, and is left out too. A library a test computes with
-# (Hypothesis, numpy) is part of the code under test and stays in.
+# pytest documents, and is left out too, unless it changes what a test
+# does. A library a test computes with (Hypothesis, numpy) is part of
+# the code under test and stays in.
 TEST_RUNNER_DISTRIBUTIONS = frozenset({
     "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci"})
 TEST_RUNNER_PREFIX = "pytest-"
+
+# `pytest-*` plugins that change what a test does, so their versions
+# stay in the class: they reseed or reorder, repeat or rerun tests, set
+# the environment, or replace time, the event loop or collaborators.
+BEHAVIOUR_PLUGINS = frozenset({
+    "pytest-randomly", "pytest-random-order", "pytest-repeat",
+    "pytest-rerunfailures", "pytest-flakefinder", "pytest-env",
+    "pytest-mock", "pytest-asyncio", "pytest-freezer", "pytest-freezegun"})
 
 
 def is_test_runner(name: str) -> bool:
@@ -80,6 +89,8 @@ def is_test_runner(name: str) -> bool:
         rather than being part of the code under test.
     """
     key = _normalise(name)
+    if key in BEHAVIOUR_PLUGINS:
+        return False
     return key in TEST_RUNNER_DISTRIBUTIONS or key.startswith(TEST_RUNNER_PREFIX)
 
 
