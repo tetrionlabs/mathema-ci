@@ -44,6 +44,8 @@ class Staging:
     staged: tuple[InferredClaim, ...]
     findings: tuple[Finding, ...]
     path: str
+    gone: tuple[InferredClaim, ...] = ()
+    undecided: tuple[InferredClaim, ...] = ()
 
 
 DISCOUNTED = InferredClaim(
@@ -104,3 +106,12 @@ class FakeScorer:
     def __call__(self, root):
         self.calls.append(root)
         return self.scores
+
+
+@dataclass
+class FakeVerifier:
+    """Records each root it was asked to verify."""
+    calls: list = field(default_factory=list)
+
+    def __call__(self, root):
+        self.calls.append(root)

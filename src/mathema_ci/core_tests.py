@@ -68,7 +68,9 @@ class Finding(Protocol):
 
 
 class Staging(Protocol):
-    """The claims staged, the findings, and the staged file's path."""
+    """The claims staged, the findings, the staged file's path, the
+    staged claims whose test no longer states them (`gone`), and the
+    claims mathema neither found to hold nor falsified (`undecided`)."""
 
     @property
     def staged(self) -> tuple[Claim, ...]: ...
@@ -76,6 +78,10 @@ class Staging(Protocol):
     def findings(self) -> tuple[Finding, ...]: ...
     @property
     def path(self) -> str: ...
+    @property
+    def gone(self) -> tuple[Claim, ...]: ...
+    @property
+    def undecided(self) -> tuple[Claim, ...]: ...
 
 
 class Reader(Protocol):

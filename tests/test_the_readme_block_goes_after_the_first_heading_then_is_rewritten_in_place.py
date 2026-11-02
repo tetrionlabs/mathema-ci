@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from measure_fakes import FakeReader, FakeScorer, FakeSuite
+from measure_fakes import FakeReader, FakeScorer, FakeSuite, FakeVerifier
 
 from mathema_ci.measure import parse_args, run
 from mathema_ci.readme import (
@@ -100,7 +100,7 @@ def test_an_unknown_host_keeps_the_owner_repo_placeholder():
 
 def _measure(tmp_path, argv, remote="https://github.com/acme/billing.git"):
     return run(parse_args(argv), root=str(tmp_path), run_suite=FakeSuite(0),
-               reader=FakeReader(), score=FakeScorer(),
+               reader=FakeReader(), verify=FakeVerifier(), score=FakeScorer(),
                remote=lambda root: remote)
 
 

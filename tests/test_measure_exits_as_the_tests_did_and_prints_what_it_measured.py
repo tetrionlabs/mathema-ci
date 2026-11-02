@@ -13,6 +13,7 @@ from measure_fakes import (
     FakeReader,
     FakeScorer,
     FakeSuite,
+    FakeVerifier,
     Staging,
 )
 
@@ -20,12 +21,13 @@ from mathema_ci.measure import parse_args, run
 from mathema_ci.render import render_triangle
 
 
-def _run(tmp_path, argv, *, status=0, reader=None, scorer=None):
+def _run(tmp_path, argv, *, status=0, reader=None, scorer=None, verify=None):
     suite = FakeSuite(status)
     reader = FakeReader() if reader is None else reader
     scorer = FakeScorer() if scorer is None else scorer
+    verify = FakeVerifier() if verify is None else verify
     code = run(parse_args(["--no-readme", *argv]), root=str(tmp_path),
-               run_suite=suite, reader=reader, score=scorer,
+               run_suite=suite, reader=reader, verify=verify, score=scorer,
                remote=lambda root: None)
     return code, suite, reader, scorer
 
@@ -76,7 +78,7 @@ def test_without_stage_the_tests_are_read_and_nothing_is_staged(tmp_path, capsys
     assert "finding:" not in out
 
 
-def test_stage_stages_before_scoring_and_prints_the_staged_line(tmp_path, capsys):
+def test_stage_stages_then_verify_records_then_scoring_reads(tmp_path, capsys):
     order = []
     reader = FakeReader()
     scorer = FakeScorer()
@@ -90,9 +92,12 @@ def test_stage_stages_before_scoring_and_prints_the_staged_line(tmp_path, capsys
         order.append("score")
         return scorer(root)
 
+    def verify(root):
+        order.append("verify")
+
     reader.stage = stage  # type: ignore[method-assign]
-    _run(tmp_path, ["--stage"], reader=reader, scorer=score)
-    assert order == ["stage", "score"]
+    _run(tmp_path, ["--stage"], reader=reader, scorer=score, verify=verify)
+    assert order == ["stage", "verify", "score"]
     assert reader.stage_calls == [(reader.reading, str(tmp_path))]
     out = capsys.readouterr().out
     assert "staged: 1 claim in claims/staged.claims.yaml" in out
@@ -151,8 +156,8 @@ def test_with_no_tests_directory_the_whole_root_is_read(tmp_path):
 
 def test_a_mathema_without_the_test_reader_still_measures(tmp_path, capsys):
     code = run(parse_args(["--no-readme", "--stage"]), root=str(tmp_path),
-               run_suite=FakeSuite(0), reader=None, score=FakeScorer(),
-               remote=lambda root: None)
+               run_suite=FakeSuite(0), reader=None, verify=FakeVerifier(),
+               score=FakeScorer(), remote=lambda root: None)
     assert code == 0
     out = capsys.readouterr().out
     assert "implementation coverage: 88%" in out
@@ -165,3 +170,33 @@ def test_out_writes_the_badge_artifacts(tmp_path, capsys):
     assert (tmp_path / "report" / "triangle.svg").exists()
     assert (tmp_path / "report" / "snapshot.json").exists()
     assert "wrote 7 artifacts to report" in capsys.readouterr().out
+
+
+def test_verify_records_the_claims_over_the_root_on_every_measure(tmp_path):
+    for argv in ([], ["--stage"]):
+        verify = FakeVerifier()
+        _run(tmp_path, argv, verify=verify)
+        assert verify.calls == [str(tmp_path)]
+
+
+def test_a_run_pytest_could_not_complete_verifies_nothing(tmp_path):
+    verify = FakeVerifier()
+    _run(tmp_path, ["--stage"], status=2, verify=verify)
+    assert verify.calls == []
+
+
+def test_gone_and_undecided_claims_are_counted(tmp_path, capsys):
+    staging = Staging(staged=(DISCOUNTED,), findings=(),
+                      path="claims/staged.claims.yaml",
+                      gone=(ROUNDED,), undecided=(ROUNDED, DISCOUNTED))
+    _run(tmp_path, ["--stage"], reader=FakeReader(staging=staging))
+    out = capsys.readouterr().out
+    assert "\nno longer read from its test: 1\n" in out
+    assert "\nneither held nor falsified: 2\n" in out
+
+
+def test_no_gone_or_undecided_line_when_there_are_none(tmp_path, capsys):
+    _run(tmp_path, ["--stage"])
+    out = capsys.readouterr().out
+    assert "no longer read from its test" not in out
+    assert "neither held nor falsified" not in out

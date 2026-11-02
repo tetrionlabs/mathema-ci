@@ -8,7 +8,8 @@
 In order: the suite runs as `coverage run -m pytest` with the test ledger
 on, its output streamed and its exit status kept; the claims the tests
 state are read, and with `--stage` decided and the ones that hold
-staged; the project is scored; the triangle, the three numbers, the
+staged; mathema's `verify` records the project's claims, the staged ones
+among them, so that scoring reads them; the project is scored; the triangle, the three numbers, the
 `implementation coverage: N%` line, what was read or staged and every
 finding are printed; the README block is kept current; with `--out` the
 badge artifacts are written. The command exits as the tests did, or 1
@@ -156,13 +157,33 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     return status
 
 
+def _importable(root: str) -> None:
+    """Intent:
+        Put the project at `root` on the import path, as mathema's own
+        commands do, so its functions resolve by dotted key.
+    """
+    if root not in sys.path:
+        sys.path.insert(0, root)
+
+
+def verify_project(root: str) -> None:
+    """Record every claim the project states, through mathema's
+    `verify_project`, the sweep `mathema verify` runs: a claim whose
+    record is fresh is left as it is, the rest are decided and recorded.
+    Clarity reads recorded claims only, so a staged claim counts from
+    here on."""
+    from mathema.verify import verify_project as sweep
+
+    _importable(root)
+    sweep(root)
+
+
 def score_project(root: str) -> BadgeScores:
     """The project's scores, through mathema's `repo_badges`, with the
     project importable."""
     from mathema.badges import repo_badges
 
-    if root not in sys.path:
-        sys.path.insert(0, root)
+    _importable(root)
     return repo_badges(None, root=root)
 
 
@@ -242,6 +263,10 @@ def tests_lines(reading: Reading | None, staging: Staging | None,
         path = os.path.relpath(path, root)
     lines = [f"staged: {_plural(len(staging.staged), 'claim', 'claims')} in "
              f"{path}; {refused}"]
+    if staging.gone:
+        lines.append(f"no longer read from its test: {len(staging.gone)}")
+    if staging.undecided:
+        lines.append(f"neither held nor falsified: {len(staging.undecided)}")
     if staging.findings:
         lines.append(f"findings: {len(staging.findings)}")
     for f in staging.findings:
@@ -284,11 +309,13 @@ def _update_readme(options: Options, root: str, base: str) -> str:
 def run(options: Options, *, root: str,
         run_suite: Callable[[Options, str], int],
         reader: Reader | None,
+        verify: Callable[[str], object],
         score: Callable[[str], BadgeScores],
         remote: Callable[[str], str | None]) -> int:
     """`measure` with its effects passed in: `run_suite` runs the tests
     and returns pytest's exit status, `reader` reads and stages claims
-    from them (None when mathema has none), `score` scores the project
+    from them (None when mathema has none), `verify` records the
+    project's claims, `score` scores the project
     and `remote` names its git remote. Returns the exit status."""
     status = run_suite(options, root)
     if status in _INCOMPLETE:
@@ -301,6 +328,7 @@ def run(options: Options, *, root: str,
                                     root=root)
         if options.stage:
             staging = reader.stage(reading, root=root)
+    verify(root)
     scores = score(root)
     lines = score_lines(scores) + [""] + tests_lines(reading, staging, root)
     if options.write_readme:
@@ -324,4 +352,5 @@ def main(argv: list[str]) -> int:
     the arguments that follow the command name."""
     return run(parse_args(argv), root=os.getcwd(),
                run_suite=run_suite_under_coverage, reader=core_reader(),
-               score=score_project, remote=origin_remote)
+               verify=verify_project, score=score_project,
+               remote=origin_remote)

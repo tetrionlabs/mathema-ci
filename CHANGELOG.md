@@ -6,6 +6,8 @@
   runs the project's tests under coverage with the test ledger on,
   streaming their output and exiting as they did; reads the claims the
   tests state and, with `--stage`, stages the ones mathema decides hold;
+  records the project's claims through `verify`, so staged claims count
+  towards clarity on the same run;
   prints the triangle, the three numbers, an `implementation coverage:
   N%` line for CI hosts that read coverage off the log, what was read or
   staged and every finding; keeps a badges block current in the README
