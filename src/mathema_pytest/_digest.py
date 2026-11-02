@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Tetrion Ltd
 """Digests the test ledger records: sha256 over bytes, over a Python
-object's source, and over a canonical text encoding of argument values.
+object's source, and over a canonical text encoding of parametrize values.
 
-The canonical encoding is what makes two calls at the same point
-compare equal across processes and runs: it never uses `hash()` or
-`repr()` of arbitrary objects (both can vary per process). A value the
-encoder cannot read exactly (an object of a user class, an oversized
-container) is encoded by its type alone, so distinct values of such a
-type count as one point.
+The canonical encoding is what makes two runs of a test with the same
+values compare equal across processes: it never uses `hash()` or `repr()`
+of arbitrary objects (both can vary per process). A value the encoder
+cannot read exactly (an object of a user class, an oversized container)
+is encoded by its type alone, so distinct values of such a type encode
+alike.
 """
 from __future__ import annotations
 
@@ -109,11 +109,3 @@ def encode(value: Any, depth: int = 0) -> str:
             parts.sort()
         return _type_name(value) + "(" + ",".join(parts) + ")"
     return "o" + _type_name(value)
-
-
-def point(args: tuple, kwargs: dict) -> str:
-    """Intent:
-        The canonical form of one call's arguments: positional in order,
-        keywords sorted by name.
-    """
-    return encode(args) + "|" + encode(dict(kwargs))

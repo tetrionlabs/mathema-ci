@@ -129,11 +129,12 @@ def _fixtures(item: Any, params: Mapping[str, Any],
 
 
 def build_row(item: Any, reports: Iterable[Any], environment: str,
-              points: set[str] | None, points_digest: str | None,
               digests: Digests) -> dict:
     """Intent:
         The row for one finished test. `class` is left None here and
         filled in once the session knows every distribution it loaded.
+        `n` and `points` are null in every row of schema 1: point counts
+        are not recorded yet.
     """
     callspec = getattr(item, "callspec", None)
     params = dict(getattr(callspec, "params", {}) or {})
@@ -156,8 +157,8 @@ def build_row(item: Any, reports: Iterable[Any], environment: str,
         "class": None,
         "environment": environment,
         "outcome": outcome(reports),
-        "n": None if points is None else len(points),
-        "points": points_digest,
+        "n": None,
+        "points": None,
         "fixtures": fixtures,
         "files": [{"path": p, "digest": digests.file(p)}
                   for p in sorted(paths)],

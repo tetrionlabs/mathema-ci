@@ -2,8 +2,8 @@
 # Copyright 2026 Tetrion Ltd
 """Under pytest-xdist each worker builds the rows of the tests it ran
 and the controller merges them into the one ledger, so a parallel run
-writes the same rows as a serial one: the same tests, outcomes,
-identities and points."""
+writes the same rows as a serial one: the same tests, outcomes and
+identities."""
 from __future__ import annotations
 
 import json
@@ -67,7 +67,7 @@ def test_a_parallel_run_writes_the_rows_of_a_serial_run(pytester):
     parallel = _ledger(pytester, "parallel", "-n", "2")
     assert len(parallel["rows"]) == 21
     assert _comparable(parallel) == _comparable(serial)
-    assert {row["n"] for row in parallel["rows"]} == {1}
+    assert {row["n"] for row in parallel["rows"]} == {None}
 
 
 def test_a_parallel_run_has_one_class_and_one_file(pytester):

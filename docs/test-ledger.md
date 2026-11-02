@@ -38,7 +38,7 @@ changed test:
 
 ```json
 {"schema": 1, "class_excludes": ["execnet", "iniconfig", "pluggy", "pytest-xdist"], "rows": [
-{"class": "3f9a...", "environment": "ci", "files": [...], "fixtures": [...], "framework": "pytest", "identity": "a41c...", "n": 2, "nodeid": "tests/test_billing.py::test_discounted", "outcome": "passed", "points": "77e0..."}
+{"class": "3f9a...", "environment": "ci", "files": [...], "fixtures": [...], "framework": "pytest", "identity": "a41c...", "n": null, "nodeid": "tests/test_billing.py::test_discounted", "outcome": "passed", "points": null}
 ]}
 ```
 
@@ -54,8 +54,8 @@ digits.
 | `class` | The environment class digest: platform, Python major.minor and the distributions the session imported, apart from those that run the tests. |
 | `environment` | The environment name, from `MATHEMA_ENV`, `local` when unset. |
 | `outcome` | `passed`, `failed`, `skipped`, `error` (setup or teardown failed), `xfailed` or `xpassed`. |
-| `n` | Distinct direct points, counted up to 1024; `null` when the project has no population. |
-| `points` | The digest of the set of those points; `null` when the project has no population. |
+| `n` | `null`: the number of points a test called a function at, which arrives later. |
+| `points` | `null`: the digest of those points, which arrives later. |
 | `fixtures` | One entry per fixture definition the test uses, transitively, sorted by name: `{"name", "path", "digest"}`. |
 | `files` | The test's file and the files its fixtures are defined in, sorted by path: `{"path", "digest"}`. |
 
@@ -72,7 +72,16 @@ of the object
 
 where `test` is the digest of the test function's source, `fixtures`
 is the row's `fixtures` list in the same order, and `params` maps each
-parametrize argument to the canonical encoding of its value (below).
+parametrize argument to the canonical encoding of its value:
+
+- `None`, `bool`, `int`, `float`, `complex`, `str` and `bytes` encode by
+  value, every NaN alike, and a subclass value (an `IntEnum`, a numpy
+  float) carries its type's name so it never equals the plain value;
+- tuples, lists, dicts, sets and frozensets encode their contents, sets
+  and dicts in sorted order, down to four levels and up to 64 items;
+- anything else, and a container past those limits, encodes as its
+  type's name only, so distinct values of such a type encode alike.
+
 A source digest is taken over the definition's whole lines as Python's
 `inspect.getsource` returns them, decorators included, so editing a
 test or any fixture it uses moves its identity, and editing an
@@ -122,7 +131,7 @@ measuring the test session:
 | `coverage`, `pytest-cov` | measure the run |
 | `pytest-sugar`, `pytest-instafail`, `pytest-pretty`, `pytest-clarity` | change how results are shown |
 | `pytest-html`, `pytest-metadata`, `pytest-json-report`, `pytest-github-actions-annotate-failures` | report the results |
-| `mathema-ci` | writes this ledger; with a population its wrappers also change function identity during the run (see below) |
+| `mathema-ci` | writes this ledger |
 
 Every other distribution stays in, since its version can change what a
 test does. That includes pytest itself, whose `approx`, `raises` and
@@ -140,43 +149,13 @@ this session's class are listed, sorted, in the ledger's `class_excludes`.
 
 ### n and points
 
-The project's population is the functions listed in
-`.mathema/index.yaml`, which `mathema audit --index` writes. With no
-index, `n` and `points` are null. With one, the plugin replaces each
-listed function whose module is imported after collection by a thin
-wrapper (`functools.wraps`, so `__wrapped__` reaches the original) and
-points every reference to the original in a loaded module at the
-wrapper, a test module's `from calc import add` included. It installs
-no trace function, since coverage owns `sys.settrace`, and it puts every
-original back when the session ends. During the run a listed function is
-not the object its module defined, so a test comparing functions with
-`is`, or a mathema check run from inside a test that reads the function's
-form, can see the wrapper.
+Both fields are in every row of schema 1 and both are `null`. Point
+counts arrive later. The plugin never replaces a function and installs no
+trace function, so a test sees the objects its modules defined and comes
+out as it does with the ledger off, with or without `.mathema/index.yaml`.
 
-On a suite of about 1,050 tests, the ledger with no population added no
-time beyond run-to-run noise. With a population of about 500 functions it
-added roughly 10 to 20 percent.
-
-A call is a direct point when it happens during the test's call phase
-and the calling code is in a collected test file. A call from inside
-the project (`twice` calling `add`) or from a fixture during setup is
-not a point. Two calls are the same point when they are to the same
-function with arguments of equal canonical encoding:
-
-- `None`, `bool`, `int`, `float`, `complex`, `str` and `bytes` encode by
-  value, every NaN alike, and a subclass value (an `IntEnum`, a numpy
-  float) carries its type's name so it never equals the plain value;
-- tuples, lists, dicts, sets and frozensets encode their contents, sets
-  and dicts in sorted order, down to four levels and up to 64 items;
-- anything else, and a container past those limits, encodes as its
-  type's name only, so distinct values of such a type count as one
-  point.
-
-`points` is the digest of the sorted list of `function(encoding)`
-strings, so two tests that called the same functions at the same
-points share it, and a test with no direct calls has the digest of the
-empty list. Each test keeps at most 1024 distinct points; past that the
-wrapper only forwards the call.
+On a suite of about 1,050 tests, the ledger added no time beyond
+run-to-run noise.
 
 ## pytest-xdist
 
@@ -189,7 +168,7 @@ pytest-xdist and execnet are left out of the class.
 ## What schema 1 leaves for later
 
 The design reserves further fields, none of which a schema 1 writer
-emits yet: the failing point as a witness, the classes of argument a
+emits yet: the points a test called, the failing point as a witness, the classes of argument a
 test passed and what each call returned (the source of absence
 suggestions), the files each test's coverage context executed, and
 when and at which commit a row was seen. The committed per-module

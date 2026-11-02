@@ -5,11 +5,12 @@
 The test ledger is one JSON file, schema 1, with one row per test: the
 test's nodeid, its outcome, the environment it ran in, a digest of what
 the test is made of (its source, its fixtures transitively, its
-parametrize values) with the path and digest of each part, and, when
-the project has a population in `.mathema/index.yaml`, how many distinct
-points the test called those functions at directly and a digest of
-them. `mathema` reads it to decide claims that depend on a test. The
-schema is documented in `docs/test-ledger.md`.
+parametrize values) with the path and digest of each part. `mathema`
+reads it to decide claims that depend on a test. The schema is
+documented in `docs/test-ledger.md`.
+
+The plugin only records. It never replaces a function, so a test sees
+the same objects and reaches the same outcome as on a run without it.
 
 The plugin is active only when the run passes `--mathema-test-ledger
 PATH` or sets `MATHEMA_TEST_LEDGER` (`1` for the default path
@@ -24,18 +25,16 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from . import _environment, _ledger, _population
+from . import _environment, _ledger
 
 OPTION = "--mathema-test-ledger"
 ENV = "MATHEMA_TEST_LEDGER"
 DEFAULT_PATH = os.path.join(".mathema", "tests", "ledger.json")
-INDEX_PATH = os.path.join(".mathema", "index.yaml")
 PLUGIN_NAME = "mathema-test-ledger"
 WORKER_KEY = "mathema_test_ledger"
 
@@ -87,9 +86,8 @@ def pytest_configure(config) -> None:
 class TestLedger:
     """Intent:
         The session's ledger writer, registered only when the ledger is
-        on. In a single process it observes, builds and writes; in an
-        xdist worker it observes and builds; in the xdist controller it
-        merges and writes.
+        on. In a single process it builds and writes; in an xdist worker
+        it builds; in the xdist controller it merges and writes.
     """
 
     __test__ = False
@@ -101,13 +99,9 @@ class TestLedger:
         self.is_worker = hasattr(config, "workerinput")
         self.environment = _environment.environment_name()
         self.digests = _ledger.Digests(self.root)
-        self.observer = _population.Observer()
-        self.population = _population.read_population(
-            str(self.root / INDEX_PATH))
         self.rows: list[dict] = []
         self.distributions: dict[str, str] = {}
         self._reports: dict[str, list[Any]] = {}
-        self._points: dict[str, set[str]] = {}
 
     def _controller(self) -> bool:
         """Intent:
@@ -116,25 +110,6 @@ class TestLedger:
         """
         return (not self.is_worker
                 and self.config.pluginmanager.hasplugin("dsession"))
-
-    def pytest_collection_finish(self, session) -> None:
-        if self.population is None:
-            return
-        files = {str(item.path) for item in session.items
-                 if getattr(item, "path", None) is not None}
-        self.observer.install(self.population, files)
-
-    @pytest.hookimpl(hookwrapper=True)
-    def pytest_runtest_call(self, item: Any) -> Iterator[None]:
-        points: set[str] | None = (
-            set() if self.population is not None else None)
-        self.observer.points = points
-        try:
-            yield
-        finally:
-            self.observer.points = None
-            if points is not None:
-                self._points[item.nodeid] = points
 
     def pytest_runtest_logreport(self, report) -> None:
         if self._controller():
@@ -145,13 +120,8 @@ class TestLedger:
     def pytest_runtest_protocol(self, item, nextitem):
         yield
         reports = self._reports.pop(item.nodeid, [])
-        if self.population is None:
-            points, digest = None, None
-        else:
-            points = self._points.pop(item.nodeid, set())
-            digest = _population.points_digest(points)
         self.rows.append(_ledger.build_row(
-            item, reports, self.environment, points, digest, self.digests))
+            item, reports, self.environment, self.digests))
 
     @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node, error) -> None:
@@ -175,6 +145,3 @@ class TestLedger:
         env_class = _environment.environment_class(kept)
         _ledger.write(self.path,
                       _ledger.render(self.rows, env_class, excluded))
-
-    def pytest_unconfigure(self, config) -> None:
-        self.observer.uninstall()
