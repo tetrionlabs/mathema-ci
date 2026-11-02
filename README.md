@@ -17,7 +17,7 @@ is 0.1.
 mathema-ci measure --out mathema-report -- -n 2
 ```
 
-runs the project's tests under coverage with the run ledger on, scores
+runs the project's tests under coverage with the test ledger on, scores
 the project, writes the triangle and the report page to the output
 directory, keeps the README block current, prints the numbers, and exits
 as the tests did.
@@ -29,7 +29,8 @@ as the tests did.
   `render.render_triangle`, `render.render_svg`, `render.shields_payloads`,
   `artifacts.write_badges`, `artifacts.ci_snapshot`,
   `artifacts.readme_snippet` and `templates.write_ci_templates`.
-- `src/mathema_pytest/`: the pytest plugin that writes the run ledger.
+- `src/mathema_pytest/`: the pytest plugin that writes the test ledger,
+  one row per test, described in [docs/test-ledger.md](docs/test-ledger.md).
   It imports nothing from mathema, since it runs inside the measured
   project's test process.
 
