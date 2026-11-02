@@ -51,7 +51,7 @@ Changelog = "https://github.com/tetrionlabs/mathema-ci/blob/main/CHANGELOG.md"
 mathema-ci = "mathema_ci.cli:main"
 
 # The pytest plugin is registered on install and stays inert until the
-# run asks for it (--mathema-ledger or MATHEMA_LEDGER=1), so a project
+# run asks for it (--mathema-test-ledger PATH or MATHEMA_TEST_LEDGER), so a project
 # that installs this package for `measure` sees no change to a plain
 # `pytest` run.
 [project.entry-points.pytest11]
