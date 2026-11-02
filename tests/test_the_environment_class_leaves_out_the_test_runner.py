@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Tetrion Ltd
 """The environment class is a digest of what the code under test runs
-on. The distributions that run the tests (pytest and its plugins, its
-own dependencies pluggy and iniconfig, xdist's execnet, coverage, and
-the ledger writer itself) are left out of it, so a serial run and a
-parallel run of the same code share a class. A library a test computes
-with, Hypothesis among them, stays in. The ledger lists the names it
-left out."""
+on. The distributions listed as running the tests (pytest, its own
+dependencies pluggy and iniconfig, xdist and its execnet, coverage, the
+ledger writer itself, and the plugins known only to run or observe the
+session) are left out of it, so a serial run and a parallel run of the
+same code share a class. Everything else stays in: a library a test
+computes with, and any pytest plugin not on that list, so an unknown
+plugin costs a spare class and never a false match. The ledger lists the
+names it left out."""
 from __future__ import annotations
 
 import json
@@ -105,3 +107,31 @@ def test_a_behaviour_plugin_version_moves_the_class():
     bumped = {**LOADED, "pytest-randomly": "3.17.0"}
     assert (environment_class(class_distributions(bumped)[0])
             != environment_class(class_distributions(with_randomly)[0]))
+
+
+SESSION_PLUGINS = ("pytest-xdist", "pytest-cov", "pytest-timeout", "pytest-sugar",
+                   "pytest-html", "pytest-metadata", "pytest-instafail",
+                   "pytest-json-report", "pytest-pretty", "pytest-clarity",
+                   "pytest-github-actions-annotate-failures")
+
+
+def test_a_plugin_known_only_to_run_or_observe_the_session_is_left_out():
+    kept, excluded = class_distributions({name: "1.0" for name in SESSION_PLUGINS})
+    assert kept == {}
+    assert excluded == sorted(SESSION_PLUGINS)
+
+
+def test_a_plugin_nobody_has_listed_stays_in():
+    plugins = {"pytest-django": "4.11.0", "pytest-httpx": "0.35.0",
+               "pytest-never-heard-of-it": "0.1"}
+    kept, excluded = class_distributions({**LOADED, **plugins})
+    assert plugins.items() <= kept.items()
+    assert not set(plugins) & set(excluded)
+
+
+def test_an_unlisted_plugin_costs_a_new_class_rather_than_a_false_match():
+    one = {**LOADED, "pytest-never-heard-of-it": "0.1"}
+    other = {**LOADED, "pytest-never-heard-of-it": "0.2"}
+    classes = {environment_class(class_distributions(d)[0])
+               for d in (LOADED, one, other)}
+    assert len(classes) == 3

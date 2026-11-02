@@ -65,33 +65,24 @@ def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
 
 # Distributions whose purpose is to run, schedule, observe or measure a
 # test session: pytest with its own dependencies pluggy and iniconfig,
-# xdist's transport execnet, coverage, and this ledger writer. Every
-# `pytest-*` distribution is a pytest plugin by the naming convention
-# pytest documents, and is left out too, unless it changes what a test
-# does. A library a test computes with (Hypothesis, numpy) is part of
-# the code under test and stays in.
+# xdist's transport execnet, coverage, this ledger writer, and the pytest
+# plugins known to do only that. Everything else stays in the class, any
+# other `pytest-*` plugin included, so a plugin nobody has listed costs a
+# spare class and never a false match.
 TEST_RUNNER_DISTRIBUTIONS = frozenset({
-    "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci"})
-TEST_RUNNER_PREFIX = "pytest-"
-
-# `pytest-*` plugins that change what a test does, so their versions
-# stay in the class: they reseed or reorder, repeat or rerun tests, set
-# the environment, or replace time, the event loop or collaborators.
-BEHAVIOUR_PLUGINS = frozenset({
-    "pytest-randomly", "pytest-random-order", "pytest-repeat",
-    "pytest-rerunfailures", "pytest-flakefinder", "pytest-env",
-    "pytest-mock", "pytest-asyncio", "pytest-freezer", "pytest-freezegun"})
+    "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci",
+    "pytest-xdist", "pytest-cov", "pytest-timeout", "pytest-sugar",
+    "pytest-html", "pytest-metadata", "pytest-instafail",
+    "pytest-json-report", "pytest-pretty", "pytest-clarity",
+    "pytest-github-actions-annotate-failures"})
 
 
 def is_test_runner(name: str) -> bool:
     """Intent:
-        Whether the distribution `name` (normalised) runs the tests
-        rather than being part of the code under test.
+        Whether the distribution `name` is listed as running the tests
+        rather than being part of what they run on.
     """
-    key = _normalise(name)
-    if key in BEHAVIOUR_PLUGINS:
-        return False
-    return key in TEST_RUNNER_DISTRIBUTIONS or key.startswith(TEST_RUNNER_PREFIX)
+    return _normalise(name) in TEST_RUNNER_DISTRIBUTIONS
 
 
 def class_distributions(

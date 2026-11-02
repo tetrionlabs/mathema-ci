@@ -110,36 +110,30 @@ of one ledger carries the same class: under pytest-xdist the controller
 takes the union of what each worker imported.
 
 The class describes what the code under test runs on, so a distribution
-is left out when its purpose is to run, schedule, observe or measure the
-test session rather than to be called by the code or its tests:
+is left out only when it is listed as running, scheduling, observing or
+measuring the test session:
 
-- `pytest`, and its own dependencies `pluggy` and `iniconfig`;
-- every `pytest-*` distribution, a pytest plugin by pytest's naming
-  convention (`pytest-xdist`, `pytest-cov`, `pytest-timeout`, ...),
-  apart from the plugins listed below;
-- `execnet`, pytest-xdist's transport to its workers;
-- `coverage`, which measures the run;
-- `mathema-ci`, which writes this ledger.
-
-A library a test computes with stays in, Hypothesis among them, since
-its version can change what the test does. So do the `pytest-*` plugins
-that change what a test does, whichever session they load in:
-
-| plugin | what it changes |
+| distribution | what it does |
 |---|---|
-| `pytest-randomly` | reseeds `random` for each test and reorders the tests |
-| `pytest-random-order` | reorders the tests |
-| `pytest-repeat`, `pytest-flakefinder` | run a test several times |
-| `pytest-rerunfailures` | reruns a failed test, so its outcome can change |
-| `pytest-env` | sets environment variables the code reads |
-| `pytest-mock` | replaces collaborators through its `mocker` fixture |
-| `pytest-asyncio` | supplies the event loop async tests run on |
-| `pytest-freezer`, `pytest-freezegun` | fix the time the code reads |
+| `pytest`, `pluggy`, `iniconfig` | pytest and its own plugin and configuration dependencies |
+| `pytest-xdist`, `execnet` | run the tests in worker processes, and carry messages to them |
+| `pytest-timeout` | stops a test that runs too long |
+| `coverage`, `pytest-cov` | measure the run |
+| `pytest-sugar`, `pytest-instafail`, `pytest-pretty`, `pytest-clarity` | change how results are shown |
+| `pytest-html`, `pytest-metadata`, `pytest-json-report`, `pytest-github-actions-annotate-failures` | report the results |
+| `mathema-ci` | writes this ledger |
 
-A plugin not in that table is left out by its name. So a serial run and a
-pytest-xdist run of the same code share a class, and so do runs under
-different pytest versions. The names left out of this session's class
-are listed, sorted, in the ledger's `class_excludes`.
+Every other distribution stays in, since its version can change what a
+test does. That includes a library a test computes with, Hypothesis among
+them, and every other `pytest-*` plugin: `pytest-randomly` reseeds `random`
+and reorders the tests, `pytest-rerunfailures` can change an outcome,
+`pytest-mock` replaces collaborators. A plugin this list does not know
+therefore costs a spare class, and never lets two different environments
+share one.
+
+So a serial run and a pytest-xdist run of the same code share a class,
+and so do runs under different pytest versions. The names left out of
+this session's class are listed, sorted, in the ledger's `class_excludes`.
 
 ### n and points
 

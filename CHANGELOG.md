@@ -28,8 +28,8 @@
   environment name and class, the digests of its source, fixtures and
   parametrize values, and the number of distinct points at which it
   called the project's indexed functions. The environment class leaves
-  out the distributions that run the tests (pytest and its plugins,
-  execnet, coverage), which the ledger lists in `class_excludes`, so
+  out the distributions listed as running the tests (pytest, pytest-xdist,
+  execnet, coverage and the like), which the ledger lists in `class_excludes`, so
   parallel runs under pytest-xdist write the same rows as serial ones,
   class included. The schema is in
   `docs/test-ledger.md`.
