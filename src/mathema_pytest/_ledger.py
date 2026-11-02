@@ -164,16 +164,21 @@ def build_row(item: Any, reports: Iterable[Any], environment: str,
     }
 
 
-def render(rows: Iterable[dict], env_class: str) -> str:
+def render(rows: Iterable[dict], env_class: str,
+           class_excludes: Iterable[str] = ()) -> str:
     """Intent:
-        The ledger file's text: schema 1, the rows sorted by nodeid with
-        `class` set, one row per line so a diff shows one line per test.
+        The ledger file's text: schema 1, the sorted names of the
+        distributions left out of the environment class, then the rows
+        sorted by nodeid with `class` set, one row per line so a diff
+        shows one line per test.
     """
     ordered = sorted(({**row, "class": env_class} for row in rows),
                      key=lambda row: row["nodeid"])
     lines = [json.dumps(row, sort_keys=True) for row in ordered]
     body = ",\n".join(lines)
-    return ('{"schema": %d, "rows": [\n' % SCHEMA
+    excludes = json.dumps(sorted(class_excludes))
+    return ('{"schema": %d, "class_excludes": %s, "rows": [\n'
+            % (SCHEMA, excludes)
             + (body + "\n" if body else "") + "]}\n")
 
 

@@ -30,12 +30,14 @@ never changed by the plugin.
 
 ## Schema 1
 
-The file is one JSON object with the schema number and the rows, sorted
-by `nodeid` and written one row per line, so a diff between two ledgers
-shows one changed line per changed test:
+The file is one JSON object with the schema number, `class_excludes`
+(the sorted names of the distributions left out of the environment
+class, see below) and the rows, sorted by `nodeid` and written one row
+per line, so a diff between two ledgers shows one changed line per
+changed test:
 
 ```json
-{"schema": 1, "rows": [
+{"schema": 1, "class_excludes": ["execnet", "iniconfig", "pluggy", "pytest", "pytest-xdist"], "rows": [
 {"class": "3f9a...", "environment": "ci", "files": [...], "fixtures": [...], "framework": "pytest", "identity": "a41c...", "n": 2, "nodeid": "tests/test_billing.py::test_discounted", "outcome": "passed", "points": "77e0..."}
 ]}
 ```
@@ -49,7 +51,7 @@ digits.
 | `framework` | `pytest`. The schema names the framework per row so other test runners can feed the same ledger later. |
 | `nodeid` | The test's id in its framework's own form, here pytest's nodeid (`tests/test_x.py::TestA::test_b[2]`). |
 | `identity` | The digest of what the test is made of: its own source, every fixture it uses and its parametrize values (see below). |
-| `class` | The environment class digest: platform, Python major.minor and the distributions the session imported. |
+| `class` | The environment class digest: platform, Python major.minor and the distributions the session imported, apart from those that run the tests. |
 | `environment` | The environment name, from `MATHEMA_ENV`, `local` when unset. |
 | `outcome` | `passed`, `failed`, `skipped`, `error` (setup or teardown failed), `xfailed` or `xpassed`. |
 | `n` | Distinct direct points, counted up to 1024; `null` when the project has no population. |
@@ -101,11 +103,28 @@ The environment class is computed. It is the digest of
 
 where `distributions` lists, sorted, every installed distribution that
 provides a top-level package imported during the session (names in
-lowercase, each run of `-`, `_` or `.` written as one hyphen). A
-dependency bump makes a new class,
-while a lockfile keeps it stable from run to run. Every row of one
-ledger carries the same class: under pytest-xdist the controller takes
-the union of what each worker imported.
+lowercase, each run of `-`, `_` or `.` written as one hyphen), apart
+from the distributions that run the tests. A dependency bump makes a
+new class, while a lockfile keeps it stable from run to run. Every row
+of one ledger carries the same class: under pytest-xdist the controller
+takes the union of what each worker imported.
+
+The class describes what the code under test runs on, so a distribution
+is left out when its purpose is to run, schedule, observe or measure the
+test session rather than to be called by the code or its tests:
+
+- `pytest`, and its own dependencies `pluggy` and `iniconfig`;
+- every `pytest-*` distribution, a pytest plugin by pytest's naming
+  convention (`pytest-xdist`, `pytest-cov`, `pytest-timeout`, ...);
+- `execnet`, pytest-xdist's transport to its workers;
+- `coverage`, which measures the run;
+- `mathema-ci`, which writes this ledger.
+
+A library a test computes with stays in, Hypothesis among them, since
+its version can change what the test does. So a serial run and a
+pytest-xdist run of the same code share a class, and so do runs under
+different pytest versions. The names left out of this session's class
+are listed, sorted, in the ledger's `class_excludes`.
 
 ### n and points
 
@@ -145,8 +164,8 @@ wrapper only forwards the call.
 Each worker builds the rows of the tests it ran and hands them, with
 the distributions it imported, to the controller when it shuts down.
 The controller merges them and writes the one file, so a parallel run
-writes the same rows as a serial one, apart from `class` when the
-parallel run imports pytest-xdist and the serial one does not.
+writes the same rows as a serial one, `class` included, since
+pytest-xdist and execnet are left out of the class.
 
 ## What schema 1 leaves for later
 

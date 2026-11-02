@@ -8,8 +8,10 @@ templates set `ci`). The **environment class** is computed, never
 named: sha256 over the platform (`sys.platform`, `platform.machine()`),
 the interpreter's major.minor, and the sorted names and versions of the
 distributions the session imported (`sys.modules` mapped through
-`importlib.metadata.packages_distributions`). A dependency bump makes a
-new class; a lockfile keeps it stable.
+`importlib.metadata.packages_distributions`), leaving out the
+distributions that run the tests rather than the code under test. A
+dependency bump makes a new class; a lockfile keeps it stable; a serial
+and a parallel run of the same code share one.
 """
 from __future__ import annotations
 
@@ -59,6 +61,39 @@ def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
             except metadata.PackageNotFoundError:
                 continue
     return found
+
+
+# Distributions whose purpose is to run, schedule, observe or measure a
+# test session: pytest with its own dependencies pluggy and iniconfig,
+# xdist's transport execnet, coverage, and this ledger writer. Every
+# `pytest-*` distribution is a pytest plugin by the naming convention
+# pytest documents, and is left out too. A library a test computes with
+# (Hypothesis, numpy) is part of the code under test and stays in.
+TEST_RUNNER_DISTRIBUTIONS = frozenset({
+    "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci"})
+TEST_RUNNER_PREFIX = "pytest-"
+
+
+def is_test_runner(name: str) -> bool:
+    """Intent:
+        Whether the distribution `name` (normalised) runs the tests
+        rather than being part of the code under test.
+    """
+    key = _normalise(name)
+    return key in TEST_RUNNER_DISTRIBUTIONS or key.startswith(TEST_RUNNER_PREFIX)
+
+
+def class_distributions(
+        distributions: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    """Intent:
+        Split the session's `distributions` into those the environment
+        class is computed over and the sorted names of the test-runner
+        distributions left out of it.
+    """
+    kept = {name: version for name, version in distributions.items()
+            if not is_test_runner(name)}
+    excluded = sorted(name for name in distributions if is_test_runner(name))
+    return kept, excluded
 
 
 def environment_class(distributions: dict[str, str]) -> str:

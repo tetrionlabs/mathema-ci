@@ -171,8 +171,10 @@ class TestLedger:
             self.config.workeroutput[WORKER_KEY] = json.dumps(
                 {"rows": self.rows, "distributions": self.distributions})
             return
-        env_class = _environment.environment_class(self.distributions)
-        _ledger.write(self.path, _ledger.render(self.rows, env_class))
+        kept, excluded = _environment.class_distributions(self.distributions)
+        env_class = _environment.environment_class(kept)
+        _ledger.write(self.path,
+                      _ledger.render(self.rows, env_class, excluded))
 
     def pytest_unconfigure(self, config) -> None:
         self.observer.uninstall()
