@@ -109,7 +109,7 @@ def test_a_behaviour_plugin_version_moves_the_class():
             != environment_class(class_distributions(with_randomly)[0]))
 
 
-SESSION_PLUGINS = ("pytest-xdist", "pytest-cov", "pytest-timeout", "pytest-sugar",
+SESSION_PLUGINS = ("pytest-xdist", "pytest-cov", "pytest-sugar",
                    "pytest-html", "pytest-metadata", "pytest-instafail",
                    "pytest-json-report", "pytest-pretty", "pytest-clarity",
                    "pytest-github-actions-annotate-failures")
@@ -135,3 +135,9 @@ def test_an_unlisted_plugin_costs_a_new_class_rather_than_a_false_match():
     classes = {environment_class(class_distributions(d)[0])
                for d in (LOADED, one, other)}
     assert len(classes) == 3
+
+
+def test_a_plugin_that_can_change_an_outcome_by_stopping_a_test_stays_in():
+    kept, excluded = class_distributions({"pytest-timeout": "2.4.0"})
+    assert kept == {"pytest-timeout": "2.4.0"}
+    assert excluded == []

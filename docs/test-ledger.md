@@ -117,7 +117,6 @@ measuring the test session:
 |---|---|
 | `pytest`, `pluggy`, `iniconfig` | pytest and its own plugin and configuration dependencies |
 | `pytest-xdist`, `execnet` | run the tests in worker processes, and carry messages to them |
-| `pytest-timeout` | stops a test that runs too long |
 | `coverage`, `pytest-cov` | measure the run |
 | `pytest-sugar`, `pytest-instafail`, `pytest-pretty`, `pytest-clarity` | change how results are shown |
 | `pytest-html`, `pytest-metadata`, `pytest-json-report`, `pytest-github-actions-annotate-failures` | report the results |
@@ -127,7 +126,8 @@ Every other distribution stays in, since its version can change what a
 test does. That includes a library a test computes with, Hypothesis among
 them, and every other `pytest-*` plugin: `pytest-randomly` reseeds `random`
 and reorders the tests, `pytest-rerunfailures` can change an outcome,
-`pytest-mock` replaces collaborators. A plugin this list does not know
+`pytest-timeout` can fail a test that would have passed, `pytest-mock`
+replaces collaborators. A plugin this list does not know
 therefore costs a spare class, and never lets two different environments
 share one.
 

@@ -71,7 +71,7 @@ def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
 # spare class and never a false match.
 TEST_RUNNER_DISTRIBUTIONS = frozenset({
     "pytest", "pluggy", "iniconfig", "execnet", "coverage", "mathema-ci",
-    "pytest-xdist", "pytest-cov", "pytest-timeout", "pytest-sugar",
+    "pytest-xdist", "pytest-cov", "pytest-sugar",
     "pytest-html", "pytest-metadata", "pytest-instafail",
     "pytest-json-report", "pytest-pretty", "pytest-clarity",
     "pytest-github-actions-annotate-failures"})
