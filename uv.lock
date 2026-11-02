@@ -535,7 +535,7 @@ test = [
 requires-dist = [
     { name = "coverage", specifier = ">=7.10" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
-    { name = "mathema", specifier = ">=0.6.2,<0.7" },
+    { name = "mathema", specifier = ">=0.6.3,<0.7" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
     { name = "pyyaml", specifier = ">=6" },

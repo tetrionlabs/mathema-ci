@@ -2,19 +2,20 @@
 
 ## Unreleased
 
-- `mathema-ci measure` (and core's `mathema measure`, which calls it)
-  runs the project's tests under coverage with the test ledger on,
-  streaming their output and exiting as they did; reads the claims the
-  tests state and, with `--stage`, stages the ones mathema decides hold;
-  runs `verify`, which writes `.mathema/verified`, so staged claims count
-  towards clarity on the same run; prints the triangle, the three
-  numbers, an `implementation coverage: N%` line for CI hosts that read
-  coverage off the log, what `verify` found, what was read or staged and
-  every finding; keeps a badges block current in the README
-  between `<!-- mathema:badges -->` markers; and with `--out` writes the
-  badge artifacts. `--junit` keeps pytest's junit report; `--strict`
-  fails a passing run whose tests stated a claim mathema falsified or
-  whose verify reported a problem.
+- `mathema-ci measure` (and core's `mathema measure`, once core has it,
+  which calls it) runs the project's tests under coverage with the test
+  ledger on, streaming their output and exiting as they did; reads the
+  claims the tests state and, with `--stage`, stages the ones mathema
+  decides hold, on a mathema that can read tests; runs `verify`, which
+  writes `.mathema/verified`, so staged claims count towards clarity on
+  the same run; prints the triangle, what is known about the code, what
+  was read from the tests and what to check, in words for someone new;
+  keeps a badges block current in the README between
+  `<!-- mathema:badges:start -->` and `<!-- mathema:badges:end -->`, leaving
+  a README whose markers do not pair alone and saying so; and with `--out`
+  writes the badge files. `--junit` keeps pytest's junit report. Measure is
+  not a verification step: problems are reported with a pointer to
+  `mathema verify`, the gate, and the exit status stays the tests' own.
 - Renders mathema's `BadgeScores` as the ASCII triangle, the SVG
   triangle card and the three shields, and writes them with a CI
   snapshot and a README block (whose images all load by URL, so it
@@ -26,9 +27,10 @@
   `MATHEMA_TEST_LEDGER`.
 - The test ledger: with the plugin on, a pytest run writes
   `ledger.json` (schema 1), one row per test with its outcome, its
-  environment name and class, the digests of its source, fixtures and
-  parametrize values, and the number of distinct points at which it
-  called the project's indexed functions. The environment class leaves
+  environment name and class, and the digests of its source, fixtures
+  and parametrize values. The plugin never replaces a function, so a test
+  comes out as it does without the ledger; `n` and `points` are null, and
+  point counts arrive later. The environment class leaves
   out the distributions listed as running the tests (pluggy, pytest-xdist,
   execnet, coverage and the like), which the ledger lists in `class_excludes`, so
   parallel runs under pytest-xdist write the same rows as serial ones,
