@@ -24,11 +24,12 @@ README block current, writes the badge files and exits as the tests did.
 Everything after `--` goes to pytest: `mathema-ci measure -- -n 2` runs
 the tests on two workers when pytest-xdist is installed.
 
-The tests run as the `pytest` command runs them, so each test reaches the
-outcome it reaches there. A project whose tests import its modules only
-because `python -m pytest` puts the current directory on the import path
-sets `pythonpath = .` in its pytest configuration, as plain `pytest`
-needs too.
+The tests run as the `pytest` command runs them, which is the target:
+each test reaches the outcome it reaches under `pytest`. A project whose
+tests import its modules only because `python -m pytest` puts the current
+directory on the import path sets `pythonpath = "."` under
+`[tool.pytest.ini_options]`, as plain `pytest` needs too, and `measure`
+says so when that is what stopped collection.
 
 A run prints the triangle, then:
 

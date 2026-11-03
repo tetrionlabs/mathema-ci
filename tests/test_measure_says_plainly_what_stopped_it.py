@@ -197,3 +197,43 @@ def test_a_measure_started_with_sigint_ignored_still_stops_on_sigint(tmp_path):
     assert proc.returncode == 2, out + err
     assert not (root / "finished").exists()
     assert "nothing measured" in err
+
+
+FIX = ('measure: pytest could not import {name}, which the pytest command does not '
+       'put on the import path; add pythonpath = "." under [tool.pytest.ini_options] '
+       'in pyproject.toml, or pythonpath = . in pytest.ini, then run measure again; '
+       'nothing measured')
+
+
+def test_a_root_module_the_pytest_command_cannot_import_gets_the_one_line_fix(tmp_path):
+    root = make_project(tmp_path / "p", conftest=False)
+    done = measure(root, "--no-readme")
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert FIX.format(name="pricing") in done.stderr
+    assert done.stderr.count("measure:") == 1
+    assert "Traceback" not in done.stderr
+
+
+def test_a_tests_package_the_pytest_command_cannot_import_gets_the_one_line_fix(tmp_path):
+    root = make_project(tmp_path / "p", conftest=False, tests=(
+        "from tests.helpers import two\n\n\ndef test_two():\n    assert two() == 2\n"))
+    (root / "tests" / "helpers.py").write_text("def two():\n    return 2\n")
+    done = measure(root, "--no-readme")
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert FIX.format(name="tests") in done.stderr
+
+
+def test_the_fix_applied_measures(tmp_path):
+    root = make_project(tmp_path / "p", conftest=False)
+    (root / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = "."\n')
+    done = measure(root, "--no-readme")
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_module_missing_for_another_reason_gets_no_fix(tmp_path):
+    root = make_project(tmp_path / "p")
+    (root / "tests" / "test_broken.py").write_text("import no_such_module\n")
+    done = measure(root, "--no-readme")
+    assert done.returncode == 2
+    assert "pythonpath" not in done.stderr
+    assert "measure: pytest exited 2 before the tests completed; nothing measured" in done.stderr

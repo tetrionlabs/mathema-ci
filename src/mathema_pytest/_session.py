@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -39,6 +40,9 @@ COV_PLUGIN = "_cov"
 # pytest's exit statuses for a run in which every collected test had its turn.
 _COMPLETE = (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED)
 
+# The module an import error names.
+_MISSING = re.compile(r"No module named '([\w.]+)'")
+
 
 class _Session:
     """Intent:
@@ -54,6 +58,7 @@ class _Session:
         self.junit: str | None = None
         self.junit_held: str | None = None
         self.no_test_runs = False
+        self.missing: list[str] = []
 
     def complete(self) -> bool:
         return (not self.stopped and bool(self.nodeids) and not self.no_test_runs
@@ -121,6 +126,18 @@ def pytest_runtest_logreport(report) -> None:
         _state.nodeids.add(report.nodeid)
 
 
+def pytest_collectreport(report) -> None:
+    """Intent:
+        Keep the name of each module a collection error could not import,
+        so measure can say when the project's own layout is the cause.
+    """
+    if _state is None or not report.failed:
+        return
+    for name in _MISSING.findall(str(report.longrepr)):
+        if name not in _state.missing:
+            _state.missing.append(name)
+
+
 def pytest_keyboard_interrupt(excinfo) -> None:
     if _state is not None:
         _state.stopped = True
@@ -184,6 +201,7 @@ def pytest_unconfigure(config) -> None:
         return
     record = {"started": _state.started, "complete": _state.complete(),
               "tests": 0 if _state.no_test_runs else len(_state.nodeids), "ledger": _ledger_state(config),
+              "missing": _state.missing,
               "coverage_taken": (config.pluginmanager.hasplugin(COV_PLUGIN)
                                  and not getattr(config.option, "no_cov", False))}
     try:

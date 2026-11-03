@@ -342,13 +342,37 @@ def _read_session(path: str) -> dict | None:
     return record if isinstance(record, dict) else None
 
 
-def assess_session(status: int, session: dict | None) -> SuiteStatus:
+def _unimportable_at_root(session: dict | None, root: str) -> str | None:
+    """Intent:
+        The first module a collection error could not import that is the
+        project's own: a module or package at `root`, or one under the
+        `tests` directory, which the `pytest` command does not put on the
+        import path. None when there is none.
+    """
+    for name in (session or {}).get("missing", ()):
+        top = name.split(".")[0]
+        if top == "tests" or os.path.exists(os.path.join(root, top + ".py")) \
+                or os.path.isdir(os.path.join(root, top)):
+            return name
+    return None
+
+
+def assess_session(status: int, session: dict | None, root: str = ".") -> SuiteStatus:
     """What a finished pytest process gave: whether it gives anything to
     measure, from its exit status and what its session recorded. A status
     of pytest's own for an incomplete run, a signal, a session that left
     no record or stopped before its end, and a session in which no test
-    ran, all measure nothing."""
+    ran, all measure nothing. A collection error that could not import a
+    module of the project at `root` says how to put the root on the
+    import path, as the `pytest` command needs."""
     if incomplete(status):
+        name = _unimportable_at_root(session, root)
+        if name is not None:
+            return SuiteStatus(status, measured=False, why=(
+                f"pytest could not import {name}, which the pytest command does not "
+                'put on the import path; add pythonpath = "." under '
+                "[tool.pytest.ini_options] in pyproject.toml, or pythonpath = . in "
+                "pytest.ini, then run measure again"))
         return SuiteStatus(status, measured=False)
     if session is None:
         return SuiteStatus(status, measured=False,
@@ -452,7 +476,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
         env[SESSION_VARIABLE] = session_path
         status = _run_passing_signals(command, cwd=root, env=env)
         session = _read_session(session_path)
-        result = assess_session(status, session)
+        result = assess_session(status, session, root)
     finally:
         shutil.rmtree(held, ignore_errors=True)
     if not result.measured:
