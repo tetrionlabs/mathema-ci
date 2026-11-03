@@ -66,3 +66,7 @@ def test_nothing_promises_what_does_not_ship(phrase, capsys):
     help_text = capsys.readouterr().out
     for text in (README, PROJECT["description"], help_text):
         assert phrase not in " ".join(text.split())
+
+
+def test_mathema_starts_at_the_release_mathema_ci_ships_with():
+    assert _requirement("mathema") == "mathema>=0.6.4,<0.7"

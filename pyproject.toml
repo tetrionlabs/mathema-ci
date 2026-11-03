@@ -17,7 +17,7 @@ authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # contract; it moves on minor releases, so the range stops before the
 # next one. measure runs the suite with pytest under coverage, and needs
 # coverage's CoverageConfig.serialize, first in 7.10.3.
-dependencies = ["mathema>=0.6.3,<0.7", "pyyaml>=6", "coverage>=7.10.3",
+dependencies = ["mathema>=0.6.4,<0.7", "pyyaml>=6", "coverage>=7.10.3",
                 "pytest>=8"]
 keywords = ["mathema", "continuous-integration", "code-coverage",
             "claim-driven-development", "github-actions", "gitlab-ci",
