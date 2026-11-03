@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Tetrion Ltd
 """What the package declares and says matches what it ships: it depends on
-what `measure` runs (pytest, and coverage from the first release with what
-measure reads of it), its sdist carries the ledger's documentation, its
+what `measure` runs (pytest, and coverage from the first release that
+measures pytest-xdist's workers when started as measure starts them), its sdist carries the ledger's documentation, its
 README works on PyPI and on a clean install, and nothing promises a report
 page or pipeline templates that run measure."""
 from __future__ import annotations
@@ -37,7 +37,7 @@ def test_pytest_is_a_dependency():
 
 
 def test_coverage_starts_at_the_release_measure_needs():
-    assert _requirement("coverage") == "coverage>=7.10.3"
+    assert _requirement("coverage") == "coverage>=7.13"
 
 
 def test_the_sdist_carries_the_ledger_docs():
