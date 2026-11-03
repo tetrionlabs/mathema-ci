@@ -395,7 +395,9 @@ def _session_notes(session: dict | None) -> list[str]:
 def _export_report(root: str, session: dict | None) -> list[str]:
     """Intent:
         Combine this run's coverage data and write `coverage.json` through a
-        temporary file, or the line that says why there is none.
+        temporary file, or the line that says why there is none. Code whose
+        source file does not exist (text a test compiled under a made-up
+        name) is left out of the report rather than stopping it.
     """
     def coverage_cmd(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, "-m", "coverage", *args], cwd=root,
@@ -403,18 +405,18 @@ def _export_report(root: str, session: dict | None) -> list[str]:
 
     if session and session.get("coverage_taken"):
         return ["coverage.json was not written: pytest-cov is on in this run and "
-                "takes the coverage data, so implementation leaves this run out; "
+                "takes the coverage data, so this run's lines are not in the report; "
                 "to measure, add -- --no-cov"]
     coverage_cmd("combine", "--quiet")
     tmp = os.path.join(root, f"coverage.json.{os.getpid()}.tmp")
-    done = coverage_cmd("json", "--quiet", "-o", tmp)
+    done = coverage_cmd("json", "--quiet", "--ignore-errors", "-o", tmp)
     if os.path.exists(tmp):
         os.replace(tmp, os.path.join(root, "coverage.json"))
         return []
     said = (done.stdout + done.stderr).decode("utf-8", "replace").strip().splitlines()
     why = said[-1] if said else f"coverage exited {done.returncode}"
-    return [f"coverage.json was not written ({why}), so implementation leaves this "
-            "run out"]
+    return [f"coverage.json was not written ({why}), so implementation does not "
+            "rest on this run's report"]
 
 
 def run_suite_under_coverage(options: Options, root: str) -> int:
@@ -452,7 +454,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     notes = _session_notes(session)
     if unusable is not None:
         notes.append(f"coverage could not start ({unusable}), so the tests ran without "
-                     "it and implementation leaves this run out")
+                     "it and its lines are not in the report")
     else:
         notes += _export_report(root, session)
     return SuiteStatus(result, notes=tuple(notes))

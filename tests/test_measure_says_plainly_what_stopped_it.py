@@ -171,3 +171,14 @@ def test_a_process_that_dies_in_a_test_measures_nothing(tmp_path):
     done = measure(root)
     assert "What is known about your code" not in done.stdout
     assert "nothing measured" in done.stderr
+
+
+def test_code_from_a_file_that_does_not_exist_still_gives_a_report(tmp_path):
+    root = make_project(tmp_path / "p")
+    (root / "tests" / "test_doc.py").write_text(
+        "def test_doc():\n"
+        "    exec(compile('x = 1\\n', 'adaptor-argparse.md', 'exec'), {})\n")
+    done = measure(root, "--no-readme")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "coverage.json was not written" not in done.stdout
+    assert "pricing.py" in (root / "coverage.json").read_text()
