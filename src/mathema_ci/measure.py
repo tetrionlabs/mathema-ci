@@ -30,6 +30,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -53,9 +54,9 @@ from .core_tests import (
     window_words,
 )
 from .readme import (
-    MARKER_START,
     PLACEHOLDER_BASE,
     badges_base,
+    has_block,
     marker_problem,
     place_block,
     readme_block,
@@ -705,18 +706,43 @@ def staging_lines(staging: Staging, *, root: str, counted: bool,
     return lines
 
 
+def _replace_text(path: str, text: str) -> None:
+    """Intent:
+        Write `text` to the file `path` (or, for a link, the file it points
+        to) in one step: through a temporary file beside it, with the file's
+        mode, so a reader sees the old text or the new. A file that cannot
+        be written is left as it was and raises `PermissionError`.
+    """
+    target = os.path.realpath(path)
+    if not os.access(target, os.W_OK):
+        raise PermissionError(f"{path} is not writable")
+    mode = os.stat(target).st_mode
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
+                               prefix="." + os.path.basename(target) + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+        os.chmod(tmp, stat.S_IMODE(mode))
+        os.replace(tmp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
 def _update_readme(options: Options, root: str, base: str) -> str | None:
     """Intent:
         Keep the README block current in `options.readme` and the line that
         says what was done: added, updated or why nothing was, and no line
-        when it was already current.
+        when it was already current. The file is read and written as its
+        bytes stand, line endings included.
     """
     rel = options.readme
     path = rel if os.path.isabs(rel) else os.path.join(root, rel)
     if not os.path.exists(path):
         return f"README: no {rel}, so no badges block"
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8", newline="") as fh:
             text = fh.read()
         problem = marker_problem(text)
         if problem is not None:
@@ -725,11 +751,10 @@ def _update_readme(options: Options, root: str, base: str) -> str | None:
         if new == text:
             return None
         assert new is not None
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(new)
+        _replace_text(path, new)
     except (OSError, ValueError) as exc:
         return f"README: could not be read or written ({_in_plain_words(exc)})"
-    done = "updated" if MARKER_START in text else "added"
+    done = "updated" if has_block(text) else "added"
     said = f"README: {done} the badges block"
     if base == PLACEHOLDER_BASE:
         said += "; replace OWNER/REPO in its links with your repository"
