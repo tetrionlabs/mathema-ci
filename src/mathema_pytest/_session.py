@@ -184,7 +184,8 @@ def pytest_unconfigure(config) -> None:
         return
     record = {"started": _state.started, "complete": _state.complete(),
               "tests": 0 if _state.no_test_runs else len(_state.nodeids), "ledger": _ledger_state(config),
-              "coverage_taken": config.pluginmanager.hasplugin(COV_PLUGIN)}
+              "coverage_taken": (config.pluginmanager.hasplugin(COV_PLUGIN)
+                                 and not getattr(config.option, "no_cov", False))}
     try:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(_state.path))
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

@@ -34,7 +34,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Protocol
@@ -86,6 +86,16 @@ SESSION_VARIABLE = "MATHEMA_CI_SESSION"
 # passes the interrupt on, and how often measure looks, both in seconds.
 _INTERRUPT_GRACE = 2.0
 _POLL_SECONDS = 0.1
+
+# After a signal, how long the run's coverage data must stay away before
+# measure stops erasing it, and the longest it waits, in seconds.
+_SETTLE_SECONDS = 1.0
+_SETTLE_LIMIT = 10.0
+
+# The variable that keeps pytest from loading plugins by entry point, and
+# the name of the ledger plugin's entry point, loaded by name when it is set.
+_NO_AUTOLOAD = "PYTEST_DISABLE_PLUGIN_AUTOLOAD"
+_LEDGER_ENTRY_POINT = "mathema"
 
 # Each score and what it means to someone reading it for the first time.
 _SCORES = (("implementation", "lines your tests, probes or proofs ran"),
@@ -189,13 +199,18 @@ def parse_args(argv: list[str]) -> Options:
                    pytest_args=list(rest))
 
 
-def suite_command(options: Options) -> list[str]:
+def suite_command(options: Options, environ: Mapping[str, str] | None = None) -> list[str]:
     """The command that runs the suite: pytest under `coverage run` in
     parallel mode, so each xdist worker writes its own data file, with
     the session recorder and the test ledger on and pytest's own arguments
-    last."""
+    last. When `environ` (the process's environment by default) turns
+    plugin autoloading off, the ledger plugin is loaded by name."""
+    environ = os.environ if environ is None else environ
     cmd = [sys.executable, "-m", "coverage", "run", "--parallel-mode",
-           "-m", "pytest", "-p", SESSION_PLUGIN, LEDGER_OPTION, LEDGER_PATH]
+           "-m", "pytest", "-p", SESSION_PLUGIN]
+    if environ.get(_NO_AUTOLOAD):
+        cmd += ["-p", _LEDGER_ENTRY_POINT]
+    cmd += [LEDGER_OPTION, LEDGER_PATH]
     if options.junit:
         cmd.append(f"--junitxml={options.junit}")
     return cmd + list(options.pytest_args)
@@ -248,6 +263,23 @@ def _coverage_env(root: str) -> dict[str, str]:
     return dict(os.environ, COVERAGE_PROCESS_CONFIG=config)
 
 
+def _descendants(pid: int) -> list[int]:
+    """Intent:
+        The process ids of every process below `pid` (pytest-xdist's
+        workers below pytest), deepest first, as `pgrep -P` finds them;
+        none where there is no `pgrep`.
+    """
+    found: list[int] = []
+    try:
+        out = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return found
+    for child in (int(word) for word in out.split() if word.isdigit()):
+        found += [*_descendants(child), child]
+    return found
+
+
 def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_GRACE) -> int:
     """Intent:
         `proc`'s exit status, with this process's signals passed on while it
@@ -262,8 +294,9 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
         interrupted_at.append(time.monotonic())
 
     def on_terminate(signum, frame) -> None:
-        with contextlib.suppress(OSError):
-            proc.send_signal(signum)
+        for pid in [*_descendants(proc.pid), proc.pid]:
+            with contextlib.suppress(OSError):
+                os.kill(pid, signum)
 
     previous = {}
     handlers = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
@@ -320,6 +353,69 @@ def assess_session(status: int, session: dict | None) -> SuiteStatus:
     return SuiteStatus(status)
 
 
+def _erase_late_coverage(root: str, *, settle: bool) -> None:
+    """Intent:
+        Erase this run's coverage data. After a signal the run's other
+        processes, xdist's workers among them, may still be writing theirs,
+        so with `settle` the data is erased again as it appears, until none
+        has appeared for `_SETTLE_SECONDS` or `_SETTLE_LIMIT` seconds pass.
+    """
+    _attempt(lambda: _erase_coverage(root))
+    if not settle:
+        return
+    start = quiet_since = time.monotonic()
+    while time.monotonic() - quiet_since < _SETTLE_SECONDS:
+        if time.monotonic() - start > _SETTLE_LIMIT:
+            return
+        time.sleep(_POLL_SECONDS)
+        if any(name.startswith(".coverage.") for name in os.listdir(root)):
+            _attempt(lambda: _erase_coverage(root))
+            quiet_since = time.monotonic()
+
+
+def _session_notes(session: dict | None) -> list[str]:
+    """Intent:
+        What the session record says to check: a test ledger that was off
+        or could not be written, and pytest-cov holding the coverage data.
+    """
+    if not session:
+        return []
+    notes = []
+    ledger = session.get("ledger") or {}
+    if ledger.get("state") == "off":
+        notes.append("the test ledger is off in this run, since pytest was told not to "
+                     f"load mathema's plugin, so {LEDGER_PATH} was not updated")
+    elif ledger.get("state") == "failed":
+        notes.append(f"the test ledger could not be written ({ledger.get('problem')}); "
+                     "the last one stays")
+    return notes
+
+
+def _export_report(root: str, session: dict | None) -> list[str]:
+    """Intent:
+        Combine this run's coverage data and write `coverage.json` through a
+        temporary file, or the line that says why there is none.
+    """
+    def coverage_cmd(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "coverage", *args], cwd=root,
+                              capture_output=True)
+
+    if session and session.get("coverage_taken"):
+        return ["coverage.json was not written: pytest-cov is on in this run and "
+                "takes the coverage data, so implementation leaves this run out; "
+                "to measure, add -- --no-cov"]
+    coverage_cmd("combine", "--quiet")
+    tmp = os.path.join(root, f"coverage.json.{os.getpid()}.tmp")
+    done = coverage_cmd("json", "--quiet", "-o", tmp)
+    if os.path.exists(tmp):
+        os.replace(tmp, os.path.join(root, "coverage.json"))
+        return []
+    said = (done.stdout + done.stderr).decode("utf-8", "replace").strip().splitlines()
+    why = said[-1] if said else f"coverage exited {done.returncode}"
+    return [f"coverage.json was not written ({why}), so implementation leaves this "
+            "run out"]
+
+
 def run_suite_under_coverage(options: Options, root: str) -> int:
     """Run the suite under coverage in `root`, its output streamed to
     this process's own, and return pytest's exit status (negative when a
@@ -327,28 +423,38 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     first; afterwards the per-process data files are combined and exported
     to `coverage.json`, which mathema reads, so a failing test still leaves
     the lines every other test ran. A run with nothing to measure leaves
-    the last `coverage.json` as it was and its own data is erased."""
-    def coverage_cmd(*args: str) -> None:
-        subprocess.run([sys.executable, "-m", "coverage", *args], cwd=root,
-                       capture_output=True, text=True)
-
-    _erase_coverage(root)
-    os.makedirs(os.path.join(root, os.path.dirname(LEDGER_PATH)), exist_ok=True)
+    the last `coverage.json` as it was and its own data is erased. When
+    the project's coverage configuration cannot be used, the tests run
+    without coverage and the status says so."""
+    _, unusable = _attempt(lambda: _erase_coverage(root))
+    env = os.environ.copy()
+    if unusable is None:
+        coverage_env, unusable = _attempt(lambda: _coverage_env(root))
+        env = coverage_env or env  # type: ignore[assignment]
+    with contextlib.suppress(OSError):
+        os.makedirs(os.path.join(root, os.path.dirname(LEDGER_PATH)), exist_ok=True)
+    command = suite_command(options)
+    if unusable is not None:
+        command = [sys.executable, *command[command.index("-m", 3):]]
     held = tempfile.mkdtemp(prefix="mathema-ci-")
     try:
         session_path = os.path.join(held, "session.json")
-        env = dict(_coverage_env(root), **{SESSION_VARIABLE: session_path})
-        status = _wait_passing_signals(subprocess.Popen(suite_command(options),
-                                                        cwd=root, env=env))
-        result = assess_session(status, _read_session(session_path))
+        env[SESSION_VARIABLE] = session_path
+        status = _wait_passing_signals(subprocess.Popen(command, cwd=root, env=env))
+        session = _read_session(session_path)
+        result = assess_session(status, session)
     finally:
         shutil.rmtree(held, ignore_errors=True)
     if not result.measured:
-        _erase_coverage(root)
+        _erase_late_coverage(root, settle=result < 0)
         return result
-    coverage_cmd("combine", "--quiet")
-    coverage_cmd("json", "--quiet", "-o", "coverage.json")
-    return result
+    notes = _session_notes(session)
+    if unusable is not None:
+        notes.append(f"coverage could not start ({unusable}), so the tests ran without "
+                     "it and implementation leaves this run out")
+    else:
+        notes += _export_report(root, session)
+    return SuiteStatus(result, notes=tuple(notes))
 
 
 def _importable(root: str) -> None:
@@ -451,7 +557,7 @@ def project_function_key(root: str) -> str | None:
     for module in modules_in_report(files):
         try:
             keys = discover([module])
-        except Exception:
+        except (Exception, SystemExit):
             continue
         for key in sorted(keys):
             if not any(part.startswith("_") for part in key.split(".")):
@@ -459,7 +565,7 @@ def project_function_key(root: str) -> str | None:
     return None
 
 
-def _in_plain_words(exc: Exception) -> str:
+def _in_plain_words(exc: BaseException) -> str:
     """Intent:
         An exception as `TypeName: message`, to quote in a line of output.
     """
@@ -490,10 +596,24 @@ def score_lines(scores: BadgeScores) -> list[str]:
         for name, gloss in _SCORES]
 
 
-def check_lines(verified: Verified | None, stopped: str | None) -> list[str]:
+def check_lines(verified: Verified | None, stopped: str | None,
+                notes: Sequence[str] = ()) -> list[str]:
     """What to check before relying on the scores: the problems verify
     found, counted, or that it stopped, each with the command that shows
-    more. Empty when there is nothing to check."""
+    more, then each of `notes`, what the run itself said. Empty when there
+    is nothing to check."""
+    said = _verify_check(verified, stopped)
+    lines = ([said] if said else []) + list(notes)
+    if not lines:
+        return []
+    return ["Check before relying on these numbers", *("  " + line for line in lines)]
+
+
+def _verify_check(verified: Verified | None, stopped: str | None) -> str | None:
+    """Intent:
+        The line about verify for the check section, or None when verify
+        found nothing.
+    """
     if verified is None:
         said = (f"the check of your claims stopped ({stopped}), so these "
                 "numbers use its last results; to see why: mathema verify")
@@ -502,8 +622,8 @@ def check_lines(verified: Verified | None, stopped: str | None) -> list[str]:
         said = (f"{_plural(count, 'problem', 'problems')} in your claims; to "
                 f"see {'it' if count == 1 else 'them'}: mathema verify")
     else:
-        return []
-    return ["Check before relying on these numbers", "  " + said]
+        return None
+    return said
 
 
 def begin_line(reading: Reading | None, key: str | None) -> str:
@@ -642,13 +762,13 @@ def _read_and_stage(options: Options, reader: Reader, root: str
     try:
         reading = reader.read_tests(paths_to_read(options.pytest_args, root),
                                     root=root)
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         return None, None, [f"  your tests could not be read ({_in_plain_words(exc)})"]
     if not options.stage:
         return reading, None, []
     try:
         return reading, reader.stage(reading, root=root), []
-    except Exception as exc:
+    except (Exception, SystemExit) as exc:
         return reading, None, ["  the claims read could not be checked "
                                f"({_in_plain_words(exc)})"]
 
@@ -661,7 +781,7 @@ def _notes_of(reader: Reader | None) -> Callable[[Claim], Sequence[str]]:
     def notes(claim: Claim) -> Sequence[str]:
         try:
             return statement_notes(reader, claim)
-        except Exception:
+        except (Exception, SystemExit):
             return ()
     return notes
 
@@ -681,6 +801,46 @@ def _nothing_measured(status: int) -> str:
     return f"pytest exited {int(status)} before the tests completed"
 
 
+def _attempt(step: Callable[[], object]) -> tuple[object, str | None]:
+    """Intent:
+        `step()`'s result and None, or None and what it raised in words.
+        A step that exits the interpreter counts as raising, so no step
+        after the tests can change the exit status.
+    """
+    try:
+        return step(), None
+    except (Exception, SystemExit) as exc:
+        return None, _in_plain_words(exc)
+
+
+# The triangle's marks as plain characters, for a terminal that cannot show
+# the drawn ones.
+_PLAIN_MARKS = str.maketrans({"\N{MIDDLE DOT}": ".", "\N{BLACK DIAMOND}": "*",
+                              "\N{BLACK CIRCLE}": "o"})
+
+
+def _say(text: str, stream=None) -> None:
+    """Intent:
+        Print `text` to `stream` (stdout by default) in characters the
+        stream can encode, the triangle's marks drawn plainly where needed;
+        a stream that is closed or gone takes nothing and raises nothing.
+    """
+    stream = sys.stdout if stream is None else stream
+    if stream is None:
+        return
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        text = text.translate(_PLAIN_MARKS)
+        text = text.encode(encoding, "replace").decode(encoding, "replace")
+    try:
+        print(text, file=stream, flush=True)
+    except (OSError, ValueError):
+        with contextlib.suppress(OSError, ValueError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), stream.fileno())
+
+
 def run(options: Options, *, root: str,
         run_suite: Callable[[Options, str], int],
         reader: Reader | None,
@@ -694,30 +854,41 @@ def run(options: Options, *, root: str,
     project's claims and returns what it found, `score` scores the
     project, `remote` names its git remote and `function_key` names one
     of its functions. Returns the tests' exit status, whatever was found
-    or failed after them: 128 plus the signal when a signal killed pytest."""
+    or failed after them, an interrupt included: 128 plus the signal when a
+    signal killed pytest."""
     status = run_suite(options, root)
     if incomplete(status) or status == _NO_TESTS or not getattr(status, "measured", True):
-        print(f"measure: {_nothing_measured(status)}; nothing measured", file=sys.stderr)
+        _say(f"measure: {_nothing_measured(status)}; nothing measured", sys.stderr)
         return 128 - status if status < 0 else int(status)
+    try:
+        _report(options, root=root, status=status, reader=reader, verify=verify,
+                score=score, remote=remote, function_key=function_key)
+    except KeyboardInterrupt:
+        _say("measure: interrupted after the tests; the exit status is the tests' own",
+             sys.stderr)
+    except (Exception, SystemExit) as exc:
+        _say(f"measure: stopped after the tests ({_in_plain_words(exc)}); the exit "
+             "status is the tests' own", sys.stderr)
+    return int(status)
 
+
+def _report(options: Options, *, root: str, status: int, reader: Reader | None,
+            verify: Callable[[str], Verified], score: Callable[[str], BadgeScores],
+            remote: Callable[[str], str | None],
+            function_key: Callable[[str], str | None]) -> None:
+    """Intent:
+        Everything after a measured run: read and stage the claims, record
+        them, score, print, keep the README block and write the badges.
+        Each step that raises becomes a line saying so.
+    """
     reading = staging = None
     trouble: list[str] = []
     if reader is not None:
         reading, staging, trouble = _read_and_stage(options, reader, root)
 
-    verified: Verified | None = None
-    stopped = None
-    try:
-        verified = verify(root)
-    except Exception as exc:
-        stopped = _in_plain_words(exc)
-
-    scores: BadgeScores | None = None
-    unscored = None
-    try:
-        scores = score(root)
-    except Exception as exc:
-        unscored = _in_plain_words(exc)
+    verified, stopped = _attempt(lambda: verify(root))
+    scored, unscored = _attempt(lambda: score(root))
+    scores: BadgeScores | None = scored  # type: ignore[assignment]
 
     sections: list[list[str]] = []
     if scores is not None:
@@ -727,34 +898,53 @@ def run(options: Options, *, root: str,
     else:
         sections.append(["What is known about your code",
                          f"  could not be worked out ({unscored})"])
-    if verified is not None and verified.nothing_declared:
-        sections.append([begin_line(reading, function_key(root))])
+    if verified is not None and getattr(verified, "nothing_declared", False):
+        key, _ = _attempt(lambda: function_key(root))
+        sections.append([begin_line(reading, key)])  # type: ignore[arg-type]
     if reader is None:
         sections.append([f"This mathema cannot read claims from your tests; "
                          f"mathema {READER_VERSION} or later can."])
     else:
-        claims = list(trouble)
-        if staging is not None:
-            claims = staging_lines(
-                staging, root=root, counted=verified is not None,
-                window=window_words(verified), notes=_notes_of(reader))
-        elif reading is not None and not options.stage:
-            claims = reading_lines(reading)
+        claims, unshown = _attempt(lambda: _claim_lines(
+            options, reading, staging, trouble, verified, reader, root))
+        if unshown is not None:
+            claims = [*trouble, f"  the claims read could not be shown ({unshown})"]
         if claims:
-            sections.append(["Claims read from your tests", *claims])
-    sections.append(check_lines(verified, stopped))
+            sections.append(["Claims read from your tests", *claims])  # type: ignore[misc]
+    sections.append(check_lines(verified, stopped,  # type: ignore[arg-type]
+                                getattr(status, "notes", ())))
 
     closing: list[str] = []
     if options.write_readme:
-        line = _update_readme(options, root, badges_base(remote(root)))
+        line, problem = _attempt(
+            lambda: _update_readme(options, root, badges_base(remote(root))))
+        if problem is not None:
+            line = f"README: could not be read or written ({problem})"
         if line is not None:
-            closing.append(line)
+            closing.append(line)  # type: ignore[arg-type]
     if options.out is not None:
-        closing += _write_badge_files(scores, options.out, root)
+        out = options.out
+        lines, problem = _attempt(lambda: _write_badge_files(scores, out, root))
+        closing += (lines if problem is None  # type: ignore[operator]
+                    else [f"badge files could not be written ({problem})"])
     sections.append(closing)
 
-    print("\n\n".join("\n".join(s) for s in sections if s))
-    return status
+    _say("\n\n".join("\n".join(s) for s in sections if s))
+
+
+def _claim_lines(options: Options, reading: Reading | None, staging: Staging | None,
+                 trouble: list[str], verified: Verified | None, reader: Reader,
+                 root: str) -> list[str]:
+    """Intent:
+        The lines under "Claims read from your tests": what became of the
+        staged claims, or what was read, or why neither could be.
+    """
+    if staging is not None:
+        return staging_lines(staging, root=root, counted=verified is not None,
+                             window=window_words(verified), notes=_notes_of(reader))
+    if reading is not None and not options.stage:
+        return reading_lines(reading)
+    return list(trouble)
 
 
 def main(argv: list[str]) -> int:

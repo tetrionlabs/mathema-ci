@@ -207,8 +207,18 @@ class TestLedger:
     def pytest_sessionfinish(self, session, exitstatus) -> None:
         if self.is_worker or not self._completed(exitstatus):
             return
-        self.distributions.update(self._new_distributions())
-        kept, excluded = _environment.class_distributions(self.distributions)
-        env_class = _environment.environment_class(kept)
-        _ledger.write(self.path,
-                      _ledger.render(self.rows.values(), env_class, excluded))
+        try:
+            self.distributions.update(self._new_distributions())
+            kept, excluded = _environment.class_distributions(self.distributions)
+            env_class = _environment.environment_class(kept)
+        except Exception as exc:
+            self.write_problem = f"{type(exc).__name__}: {exc}"
+            sys.stderr.write(f"mathema: the test ledger could not be written ({exc})\n")
+            return
+        try:
+            _ledger.write(self.path,
+                          _ledger.render(self.rows.values(), env_class, excluded))
+        except (OSError, ValueError) as exc:
+            self.write_problem = f"{type(exc).__name__}: {exc}"
+            sys.stderr.write(f"mathema: the test ledger could not be written to "
+                             f"{self.path} ({self.write_problem}); the last one stays\n")

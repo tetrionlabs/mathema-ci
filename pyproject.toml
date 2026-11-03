@@ -38,7 +38,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-xdist>=3", "hypothesis>=6"]
+test = ["pytest>=8", "pytest-xdist>=3", "pytest-cov>=5", "hypothesis>=6"]
 
 [project.urls]
 Homepage = "https://mathema.tetrionlabs.com"
