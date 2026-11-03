@@ -38,13 +38,12 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Protocol
+from typing import Any, Protocol, TypeVar
 
 from mathema.badges import BadgeScores
 
 from .artifacts import DEFAULT_BADGE_DIR, write_badges
 from .core_tests import (
-    READER_VERSION,
     Claim,
     Reader,
     Reading,
@@ -66,6 +65,8 @@ from .render import render_triangle
 __all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "SuiteStatus",
            "assess_session", "main", "modules_in_report", "parse_args", "project_function_key", "run",
            "suite_command"]
+
+T = TypeVar("T")
 
 LEDGER_OPTION = "--mathema-test-ledger"
 LEDGER_PATH = ".mathema/tests/ledger.json"
@@ -299,7 +300,7 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
             with contextlib.suppress(OSError):
                 os.kill(pid, signum)
 
-    previous = {}
+    previous: dict[int, Any] = {}
     handlers = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
     if hasattr(signal, "SIGHUP"):
         handlers[signal.SIGHUP] = on_terminate
@@ -318,8 +319,8 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
                     with contextlib.suppress(OSError):
                         proc.send_signal(signal.SIGINT)
     finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
+        for signum, earlier in previous.items():
+            signal.signal(signum, earlier)
 
 
 def _read_session(path: str) -> dict | None:
@@ -431,7 +432,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     env = os.environ.copy()
     if unusable is None:
         coverage_env, unusable = _attempt(lambda: _coverage_env(root))
-        env = coverage_env or env  # type: ignore[assignment]
+        env = coverage_env or env
     with contextlib.suppress(OSError):
         os.makedirs(os.path.join(root, os.path.dirname(LEDGER_PATH)), exist_ok=True)
     command = suite_command(options)
@@ -587,37 +588,46 @@ def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
-def score_lines(scores: BadgeScores) -> list[str]:
+def score_lines(scores: BadgeScores, *, known_only: bool = False) -> list[str]:
     """The four scores under their heading, each with what it means, the
-    values in a column as wide as the widest."""
-    values = {name: _pct(getattr(scores, name)) for name, _ in _SCORES}
+    values in a column as wide as the widest. With `known_only` a score
+    that is not known is left out."""
+    shown = [(name, gloss) for name, gloss in _SCORES
+             if not known_only or getattr(scores, name) is not None]
+    values = {name: _pct(getattr(scores, name)) for name, _ in shown}
     width = max(3, *(len(v) for v in values.values()))
     return ["What is known about your code"] + [
         f"  {name:<14}   {values[name]:<{width}}   {gloss}"
-        for name, gloss in _SCORES]
+        for name, gloss in shown]
 
 
 def check_lines(verified: Verified | None, stopped: str | None,
-                notes: Sequence[str] = ()) -> list[str]:
+                notes: Sequence[str] = (), *, scored: bool = True) -> list[str]:
     """What to check before relying on the scores: the problems verify
     found, counted, or that it stopped, each with the command that shows
-    more, then each of `notes`, what the run itself said. Empty when there
-    is nothing to check."""
-    said = _verify_check(verified, stopped)
+    more, then each of `notes`, what the run itself said. `scored` says
+    whether scores were shown above. Empty when there is nothing to
+    check."""
+    said = _verify_check(verified, stopped, scored)
     lines = ([said] if said else []) + list(notes)
     if not lines:
         return []
-    return ["Check before relying on these numbers", *("  " + line for line in lines)]
+    heading = "Check before relying on these numbers" if scored else "Check this first"
+    return [heading, *("  " + line for line in lines)]
 
 
-def _verify_check(verified: Verified | None, stopped: str | None) -> str | None:
+def _verify_check(verified: Verified | None, stopped: str | None,
+                  scored: bool = True) -> str | None:
     """Intent:
         The line about verify for the check section, or None when verify
-        found nothing.
+        found nothing. `scored` says scores were shown above.
     """
     if verified is None:
         said = (f"the check of your claims stopped ({stopped}), so these "
                 "numbers use its last results; to see why: mathema verify")
+        if not scored:
+            said = (f"the check of your claims stopped ({stopped}); to see "
+                    "why: mathema verify")
     elif verified.problems:
         count = len(verified.problems)
         said = (f"{_plural(count, 'problem', 'problems')} in your claims; to "
@@ -627,16 +637,25 @@ def _verify_check(verified: Verified | None, stopped: str | None) -> str | None:
     return said
 
 
+_NO_CLAIMS = "No claims yet, so intent and clarity start at 0."
+
+
 def begin_line(reading: Reading | None, key: str | None) -> str:
     """The line for a project with no claims, with a command that works on
     this mathema: read the claims of a function the tests already state
-    claims about, else ask for suggestions about a function of the project,
-    `key` when one is known."""
+    claims about, else ask for suggestions about `key`, a function of the
+    project. With neither, what to do first: mathema needs a function it
+    can import, which an uninstalled project or tests that call nothing of
+    the project do not give it."""
     if reading is not None and reading.claims:
         command = f"mathema claims {reading.claims[0].key} --from-tests"
+    elif key is not None:
+        command = f"mathema claims {key} --suggest"
     else:
-        command = f"mathema claims {key or 'your_module.your_function'} --suggest"
-    return f"No claims yet, so intent and clarity start at 0. To begin: {command}"
+        return (f"{_NO_CLAIMS} To begin, mathema needs a function of your project "
+                "that it can import: install the project in this environment and "
+                "check that your tests call it, then run measure again.")
+    return f"{_NO_CLAIMS} To begin: {command}"
 
 
 def reading_lines(reading: Reading) -> list[str]:
@@ -652,7 +671,7 @@ def reading_lines(reading: Reading) -> list[str]:
     lines = ["  " + "; ".join(counts)] if counts else []
     if reading.claims:
         lines.append("  to check them and keep the ones that hold: "
-                     "mathema measure --stage")
+                     "mathema-ci measure --stage")
     return lines
 
 
@@ -826,7 +845,7 @@ def _nothing_measured(status: int) -> str:
     return f"pytest exited {int(status)} before the tests completed"
 
 
-def _attempt(step: Callable[[], object]) -> tuple[object, str | None]:
+def _attempt(step: Callable[[], T]) -> tuple[T | None, str | None]:
     """Intent:
         `step()`'s result and None, or None and what it raised in words.
         A step that exits the interpreter counts as raising, so no step
@@ -912,32 +931,38 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         reading, staging, trouble = _read_and_stage(options, reader, root)
 
     verified, stopped = _attempt(lambda: verify(root))
-    scored, unscored = _attempt(lambda: score(root))
-    scores: BadgeScores | None = scored  # type: ignore[assignment]
+    scores, unscored = _attempt(lambda: score(root))
 
+    nothing_declared = verified is not None and getattr(verified, "nothing_declared", False)
     sections: list[list[str]] = []
     if scores is not None:
-        sections.append([render_triangle(scores.implementation, scores.intent,
-                                         scores.clarity)])
-        sections.append(score_lines(scores))
+        known = (scores.implementation, scores.intent, scores.clarity)
+        if not nothing_declared and None not in known:
+            sections.append([render_triangle(*known)])
+        sections.append(score_lines(scores, known_only=nothing_declared))
     else:
         sections.append(["What is known about your code",
                          f"  could not be worked out ({unscored})"])
-    if verified is not None and getattr(verified, "nothing_declared", False):
+    if nothing_declared:
         key, _ = _attempt(lambda: function_key(root))
-        sections.append([begin_line(reading, key)])  # type: ignore[arg-type]
+        begin = [begin_line(reading, key)]
+        if scores is not None and scores.implementation is None:
+            begin.append("Implementation and overall are worked out once a "
+                         "function has a claim.")
+        sections.append(begin)
     if reader is None:
-        sections.append([f"This mathema cannot read claims from your tests; "
-                         f"mathema {READER_VERSION} or later can."])
+        sections.append(["This mathema cannot read claims from your tests; "
+                         "a later mathema can."])
     else:
-        claims, unshown = _attempt(lambda: _claim_lines(
+        shown, unshown = _attempt(lambda: _claim_lines(
             options, reading, staging, trouble, verified, reader, root))
+        claims = shown or []
         if unshown is not None:
             claims = [*trouble, f"  the claims read could not be shown ({unshown})"]
         if claims:
-            sections.append(["Claims read from your tests", *claims])  # type: ignore[misc]
-    sections.append(check_lines(verified, stopped,  # type: ignore[arg-type]
-                                getattr(status, "notes", ())))
+            sections.append(["Claims read from your tests", *claims])
+    sections.append(check_lines(verified, stopped,
+                                getattr(status, "notes", ()), scored=scores is not None))
 
     closing: list[str] = []
     if options.write_readme:
@@ -946,11 +971,11 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         if problem is not None:
             line = f"README: could not be read or written ({problem})"
         if line is not None:
-            closing.append(line)  # type: ignore[arg-type]
+            closing.append(line)
     if options.out is not None:
         out = options.out
         lines, problem = _attempt(lambda: _write_badge_files(scores, out, root))
-        closing += (lines if problem is None  # type: ignore[operator]
+        closing += (lines or [] if problem is None
                     else [f"badge files could not be written ({problem})"])
     sections.append(closing)
 

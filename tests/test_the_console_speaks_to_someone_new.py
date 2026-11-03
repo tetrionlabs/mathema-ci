@@ -81,7 +81,7 @@ def test_read_without_stage_is_the_text_as_ruled(tmp_path, capsys):
     assert out == (render_triangle(88, 71, 52) + "\n\n" + KNOWN + """
 Claims read from your tests
   12 claims read; 40 assertions could not be read as claims
-  to check them and keep the ones that hold: mathema measure --stage
+  to check them and keep the ones that hold: mathema-ci measure --stage
 """)
 
 
@@ -125,7 +125,7 @@ def test_a_full_score_and_an_unknown_keep_the_columns(tmp_path, capsys):
 def test_a_zero_count_is_left_out_of_the_reading(tmp_path, capsys, reading, line, follows):
     out = _console(tmp_path, capsys, reader=FakeReader(reading=reading))
     assert f"Claims read from your tests\n{line}" in out
-    assert ("mathema measure --stage" in out) is follows
+    assert ("mathema-ci measure --stage" in out) is follows
 
 
 def test_nothing_read_has_no_section(tmp_path, capsys):
@@ -190,8 +190,8 @@ def test_a_core_with_no_reader_gets_one_plain_line(tmp_path, capsys):
         assert code == 0
         out = capsys.readouterr().out
         assert out == (render_triangle(88, 71, 52) + "\n\n" + KNOWN + "\n"
-                       "This mathema cannot read claims from your tests; mathema "
-                       "0.6.4 or later can.\n")
+                       "This mathema cannot read claims from your tests; a later "
+                       "mathema can.\n")
 
 
 NOTHING = Verified(nothing_declared=True, fresh=0, adjudicated=0)
@@ -213,10 +213,47 @@ def test_nothing_declared_with_no_reader_begins_from_a_function(tmp_path, capsys
     assert f"\n{START}mathema claims calc.add --suggest\n" in capsys.readouterr().out
 
 
-def test_nothing_declared_with_no_function_names_the_shape(tmp_path, capsys):
+def test_nothing_declared_with_no_function_says_what_to_do_first(tmp_path, capsys):
     out = _console(tmp_path, capsys, verified=NOTHING,
                    reader=FakeReader(reading=Reading((), ())))
-    assert f"\n{START}mathema claims your_module.your_function --suggest\n" in out
+    assert ("\nNo claims yet, so intent and clarity start at 0. To begin, mathema "
+            "needs a function of your project that it can import: install the "
+            "project in this environment and check that your tests call it, then "
+            "run measure again.\n") in out
+    assert "your_module" not in out and "mathema claims" not in out
+
+
+def test_nothing_declared_shows_no_triangle_and_no_unknown(tmp_path, capsys):
+    out = _console(tmp_path, capsys, verified=NOTHING,
+                   reader=FakeReader(reading=Reading((), ())),
+                   scores=BadgeScores(None, 0, 0, None, per_function={}),
+                   function_key=lambda root: "calc.add")
+    assert out == """What is known about your code
+  intent           0%    docstring statements a claim checks
+  clarity          0%    how much of each function's behaviour is known
+
+No claims yet, so intent and clarity start at 0. To begin: mathema claims calc.add --suggest
+Implementation and overall are worked out once a function has a claim.
+"""
+
+
+def test_an_unknown_score_with_claims_shows_no_triangle(tmp_path, capsys):
+    out = _console(tmp_path, capsys,
+                   scores=BadgeScores(None, 40, 20, None, per_function={}))
+    assert "IMPL" not in out and "dimension" not in out
+    assert out.startswith("What is known about your code\n")
+
+
+def test_a_real_first_run_says_no_claims_plainly(tmp_path):
+    from real_projects import make_project, measure
+
+    root = make_project(tmp_path / "p")
+    done = measure(root, "--no-readme")
+    assert done.returncode == 0, done.stdout + done.stderr
+    out = done.stdout.split("passed in")[1].split("\n", 1)[1]
+    assert "No claims yet, so intent and clarity start at 0. To begin: mathema claims " in out
+    for word in ("unknown", "IMPL", "dimension", "\N{BLACK DIAMOND}", "your_module"):
+        assert word not in out
 
 
 def test_no_old_vocabulary_is_left(tmp_path, capsys):

@@ -170,3 +170,15 @@ def test_a_project_with_no_claims_gets_the_line_from_the_real_sweep(tmp_path, ca
     monkeypatch.setattr(sys, "path", list(sys.path))
     assert _measure(tmp_path, verify=verify_project) == 0
     assert "No claims yet, so intent and clarity start at 0." in capsys.readouterr().out
+
+
+def test_a_sweep_that_stops_with_no_scores_promises_no_numbers(tmp_path, capsys):
+    def score(root):
+        raise RuntimeError("no store")
+
+    stopped = FakeVerifier(raises=ValueError("bad claims file"))
+    assert _measure(tmp_path, verify=stopped, scorer=score, status=1) == 1
+    out = capsys.readouterr().out
+    assert ("  the check of your claims stopped (ValueError: bad claims file); to "
+            "see why: mathema verify\n") in out
+    assert "these numbers" not in out
