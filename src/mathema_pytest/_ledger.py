@@ -18,19 +18,23 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ._digest import encode, json_digest, sha256_hex, source_digest
+from ._digest import encode, json_digest, sha256_hex, source_digest, type_only
 
 SCHEMA = 1
 FRAMEWORK = "pytest"
+INCOMPLETE = "incomplete"
 
 
 def outcome(reports: Iterable[Any]) -> str:
     """Intent:
         One test's outcome from its setup, call and teardown reports:
         `passed`, `failed`, `skipped`, `error` (setup or teardown
-        failed), `xfailed` or `xpassed`.
+        failed), `xfailed` or `xpassed`. A test with reports that reach
+        no result, stopped between its setup and the end of its call, is
+        `incomplete`: it neither passed nor failed, and a run holding one
+        writes no ledger.
     """
-    result = "passed"
+    result = None
     for report in reports:
         xfail = hasattr(report, "wasxfail")
         if report.when == "setup":
@@ -45,10 +49,12 @@ def outcome(reports: Iterable[Any]) -> str:
                 result = "xfailed" if xfail else "skipped"
             elif xfail:
                 result = "xpassed"
+            else:
+                result = "passed"
         elif report.when == "teardown" and report.failed:
             if result != "failed":
                 result = "error"
-    return result
+    return result or INCOMPLETE
 
 
 def relative(path: str | os.PathLike | None, root: Path) -> str | None:
@@ -128,6 +134,38 @@ def _fixtures(item: Any, params: Mapping[str, Any],
             for n, p, d in sorted(found, key=lambda t: (t[0], t[1] or ""))]
 
 
+def _encoded(value: Any) -> str:
+    """Intent:
+        `encode(value)`, or the value's type alone when reading the value
+        raises, as a value of an unreadable kind encodes.
+    """
+    try:
+        return encode(value)
+    except Exception:
+        return type_only(value)
+
+
+def unread_row(nodeid: str, result: str, environment: str) -> dict:
+    """Intent:
+        The row for a test whose reports are known and whose make-up could
+        not be read: a worker that crashed running it, or a test whose
+        sources raised when read. `identity` is null, since it was not
+        computed, and the fixtures and files are empty.
+    """
+    return {
+        "framework": FRAMEWORK,
+        "nodeid": nodeid,
+        "identity": None,
+        "class": None,
+        "environment": environment,
+        "outcome": result,
+        "n": None,
+        "points": None,
+        "fixtures": [],
+        "files": [],
+    }
+
+
 def build_row(item: Any, reports: Iterable[Any], environment: str,
               digests: Digests) -> dict:
     """Intent:
@@ -135,6 +173,18 @@ def build_row(item: Any, reports: Iterable[Any], environment: str,
         filled in once the session knows every distribution it loaded.
         `n` and `points` are null in every row of schema 1: point counts
         are not recorded yet.
+    """
+    reports = list(reports)
+    try:
+        return _full_row(item, reports, environment, digests)
+    except Exception:
+        return unread_row(item.nodeid, outcome(reports), environment)
+
+
+def _full_row(item: Any, reports: list[Any], environment: str,
+              digests: Digests) -> dict:
+    """Intent:
+        The row for one finished test, its make-up read and digested.
     """
     callspec = getattr(item, "callspec", None)
     params = dict(getattr(callspec, "params", {}) or {})
@@ -148,7 +198,7 @@ def build_row(item: Any, reports: Iterable[Any], environment: str,
     identity = json_digest({
         "test": test_digest,
         "fixtures": [[f["name"], f["path"], f["digest"]] for f in fixtures],
-        "params": {name: encode(value) for name, value in params.items()},
+        "params": {name: _encoded(value) for name, value in params.items()},
     })
     return {
         "framework": FRAMEWORK,
@@ -190,5 +240,9 @@ def write(path: Path, text: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise

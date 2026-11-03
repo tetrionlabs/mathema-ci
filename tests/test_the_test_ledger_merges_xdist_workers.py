@@ -76,3 +76,57 @@ def test_a_parallel_run_has_one_class_and_one_file(pytester):
     assert len({row["class"] for row in parallel["rows"]}) == 1
     assert sorted(p.name for p in (pytester.path / "out").iterdir()) == [
         "parallel.json"]
+
+
+CRASHES = '''import os
+
+
+def test_0_first():
+    pass
+
+
+def test_1_second():
+    pass
+
+
+def test_2_dies():
+    os._exit(1)
+
+
+def test_3_after():
+    pass
+'''
+
+
+def test_a_crashed_worker_keeps_what_ran(pytester):
+    pytester.makepyfile(test_crash=CRASHES)
+    result = pytester.runpytest_subprocess(
+        "--mathema-test-ledger", "out/ledger.json", "-p", "no:cacheprovider", "-n", "1")
+    assert result.ret == 1
+    rows = json.loads((pytester.path / "out" / "ledger.json").read_text())["rows"]
+    found = {row["nodeid"].split("::")[1]: row for row in rows}
+    assert {name: row["outcome"] for name, row in found.items()} == {
+        "test_0_first": "passed", "test_1_second": "passed",
+        "test_2_dies": "failed", "test_3_after": "passed"}
+    assert found["test_2_dies"]["identity"] is None
+    assert found["test_0_first"]["identity"] is not None
+
+
+def test_a_distribution_only_a_worker_imported_reaches_the_class(pytester):
+    pytester.makepyfile(test_imports="import yaml\n\n\ndef test_a():\n    assert yaml\n")
+    serial = _plain_ledger(pytester, "serial", "-p", "no:xdist")
+    parallel = _plain_ledger(pytester, "parallel", "-n", "2")
+    assert parallel["rows"][0]["class"] == serial["rows"][0]["class"]
+
+
+def test_the_controller_runs_no_test_of_its_own(pytester):
+    pytester.makepyfile(test_one="def test_a():\n    pass\n")
+    parallel = _plain_ledger(pytester, "parallel", "-n", "1")
+    assert [row["nodeid"] for row in parallel["rows"]] == ["test_one.py::test_a"]
+
+
+def _plain_ledger(pytester, name, *args):
+    result = pytester.runpytest_subprocess(
+        "--mathema-test-ledger", f"out/{name}.json", "-p", "no:cacheprovider", *args)
+    assert result.ret == 0
+    return json.loads((pytester.path / "out" / f"{name}.json").read_text())

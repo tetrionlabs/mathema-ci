@@ -17,12 +17,17 @@ PATH` or sets `MATHEMA_TEST_LEDGER` (`1` for the default path
 `.mathema/tests/ledger.json` under the rootdir, any other value except
 `0` as the path). Otherwise no hook does anything.
 
-Under pytest-xdist each worker builds the rows of the tests it ran and
-hands them to the controller, which merges them and writes the file.
+Under pytest-xdist each worker builds a test's row as the test ends and
+hands it to the controller on the test's last report, so the rows of a worker
+that later crashes are kept; the controller merges them and writes the file.
+
+The file is written only for a run that completed with at least one test, and
+a run that did not leaves the last file as it was. A file that cannot be
+written, or a row that cannot be built, is said on stderr and never changes
+the run's exit status.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -36,7 +41,9 @@ OPTION = "--mathema-test-ledger"
 ENV = "MATHEMA_TEST_LEDGER"
 DEFAULT_PATH = os.path.join(".mathema", "tests", "ledger.json")
 PLUGIN_NAME = "mathema-test-ledger"
-WORKER_KEY = "mathema_test_ledger"
+REPORT_KEY = "mathema_test_ledger"
+# The exit statuses of a run in which every test collected had its turn.
+_COMPLETE = (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED)
 
 
 def pytest_addoption(parser) -> None:
@@ -99,9 +106,14 @@ class TestLedger:
         self.is_worker = hasattr(config, "workerinput")
         self.environment = _environment.environment_name()
         self.digests = _ledger.Digests(self.root)
-        self.rows: list[dict] = []
+        self.rows: dict[tuple[str | None, str], dict] = {}
         self.distributions: dict[str, str] = {}
+        self.write_problem: str | None = None
         self._reports: dict[str, list[Any]] = {}
+        self._item: Any = None
+        self._stopped = False
+        self._tops_seen: set[str] = set()
+        self._providers: Any = None
 
     def _controller(self) -> bool:
         """Intent:
@@ -111,37 +123,92 @@ class TestLedger:
         return (not self.is_worker
                 and self.config.pluginmanager.hasplugin("dsession"))
 
+    def _new_distributions(self) -> dict[str, str]:
+        """Intent:
+            The distributions of the top-level modules this process loaded
+            since it last looked.
+        """
+        tops = {name.partition(".")[0] for name in list(sys.modules)} - self._tops_seen
+        if not tops:
+            return {}
+        self._tops_seen |= tops
+        if self._providers is None:
+            self._providers = _environment.metadata.packages_distributions()
+        return _environment.loaded_distributions(tops, self._providers)
+
+    def _receive(self, report) -> None:
+        """Intent:
+            In the controller: take the row a worker put on a test's last
+            report, or write one for a test whose worker crashed, which
+            pytest-xdist reports as failed with no phase of its own.
+        """
+        part = getattr(report, REPORT_KEY, None)
+        worker = getattr(report, "worker_id", None)
+        if part is not None:
+            self.rows[(worker, report.nodeid)] = part["row"]
+            self.distributions.update(part["distributions"])
+        elif report.failed and report.when not in ("setup", "call", "teardown"):
+            self.rows[(worker, report.nodeid)] = _ledger.unread_row(
+                report.nodeid, "failed", self.environment)
+
+    def _finish_test(self, report) -> None:
+        """Intent:
+            On a test's teardown report: build its row, and in a worker put
+            the row on the report, which pytest-xdist carries to the
+            controller as soon as this hook returns.
+        """
+        item = self._item
+        if item is None or item.nodeid != report.nodeid:
+            return
+        reports = self._reports.pop(item.nodeid, [])
+        row = _ledger.build_row(item, reports, self.environment, self.digests)
+        if self.is_worker:
+            setattr(report, REPORT_KEY,
+                    {"row": row, "distributions": self._new_distributions()})
+        else:
+            self.rows[(None, report.nodeid)] = row
+
+    @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_logreport(self, report) -> None:
         if self._controller():
+            self._receive(report)
             return
         self._reports.setdefault(report.nodeid, []).append(report)
+        if report.when == "teardown":
+            self._finish_test(report)
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item, nextitem):
+        self._item = item
         yield
-        reports = self._reports.pop(item.nodeid, [])
-        self.rows.append(_ledger.build_row(
-            item, reports, self.environment, self.digests))
+        self._item = None
 
-    @pytest.hookimpl(optionalhook=True)
-    def pytest_testnodedown(self, node, error) -> None:
-        output = getattr(node, "workeroutput", None) or {}
-        payload = output.get(WORKER_KEY)
-        if not payload:
-            return
-        part = json.loads(payload)
-        self.rows.extend(part["rows"])
-        self.distributions.update(part["distributions"])
+    def pytest_keyboard_interrupt(self, excinfo) -> None:
+        self._stopped = True
+
+    def pytest_internalerror(self, excrepr, excinfo) -> None:
+        self._stopped = True
+
+    def _completed(self, exitstatus) -> bool:
+        """Intent:
+            Whether this run may replace the last ledger: it ended by itself
+            as a complete run, some test ran, and every row reached an
+            outcome.
+        """
+        option = self.config.option
+        return (not self._stopped and exitstatus in _COMPLETE and bool(self.rows)
+                and not getattr(option, "collectonly", False)
+                and not getattr(option, "setuponly", False)
+                and not getattr(option, "setupplan", False)
+                and all(row["outcome"] != _ledger.INCOMPLETE
+                        for row in self.rows.values()))
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self, session, exitstatus) -> None:
-        self.distributions.update(
-            _environment.loaded_distributions(list(sys.modules)))
-        if self.is_worker:
-            self.config.workeroutput[WORKER_KEY] = json.dumps(
-                {"rows": self.rows, "distributions": self.distributions})
+        if self.is_worker or not self._completed(exitstatus):
             return
+        self.distributions.update(self._new_distributions())
         kept, excluded = _environment.class_distributions(self.distributions)
         env_class = _environment.environment_class(kept)
         _ledger.write(self.path,
-                      _ledger.render(self.rows, env_class, excluded))
+                      _ledger.render(self.rows.values(), env_class, excluded))

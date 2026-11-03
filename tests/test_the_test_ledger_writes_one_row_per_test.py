@@ -258,3 +258,81 @@ def test_the_run_keeps_its_exit_status(pytester):
     _project(pytester)
     result, _ = _run(pytester)
     assert result.ret == 1
+
+
+def _ledger_after(pytester, source, *args):
+    pytester.makepyfile(test_rows=source)
+    path = pytester.path / "out" / "ledger.json"
+    result = pytester.runpytest_subprocess(
+        "--mathema-test-ledger", "out/ledger.json", "-p", "no:cacheprovider",
+        "-p", "no:xdist", *args)
+    return result, (json.loads(path.read_text()) if path.exists() else None)
+
+
+def test_a_value_whose_encoding_raises_keeps_the_run_and_its_row(pytester):
+    result, ledger = _ledger_after(pytester, '''import pytest
+
+
+class Awkward(float):
+    def hex(self):
+        raise RuntimeError("no hex")
+
+
+class Awkward2(list):
+    def __len__(self):
+        raise RuntimeError("no len")
+
+
+@pytest.mark.parametrize("m", [Awkward(1.0)], ids=["a"])
+def test_a(m):
+    pass
+
+
+@pytest.mark.parametrize("m", [Awkward2()], ids=["b"])
+def test_b(m):
+    pass
+''')
+    assert result.ret == 0
+    assert {row["outcome"] for row in ledger["rows"]} == {"passed"}
+    assert len(ledger["rows"]) == 2
+
+
+@pytest.mark.parametrize("args", [["--collect-only"], ["-k", "nothing_has_this"],
+                                  ["--setup-plan"]])
+def test_a_run_of_no_tests_writes_no_ledger(pytester, args):
+    _, ledger = _ledger_after(pytester, "def test_a():\n    pass\n", *args)
+    assert ledger is None
+
+
+def test_a_write_goes_through_a_temporary_file(tmp_path):
+    from pathlib import Path
+
+    from mathema_pytest._ledger import write
+
+    path = Path(tmp_path) / "d" / "ledger.json"
+    write(path, "old")
+    other = tmp_path / "same-bytes"
+    other.hardlink_to(path)
+    write(path, "new")
+    assert path.read_text() == "new"
+    assert other.read_text() == "old"
+    assert sorted(p.name for p in path.parent.iterdir()) == ["ledger.json"]
+
+
+def test_a_failed_write_leaves_the_last_ledger_and_no_temporary_file(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from mathema_pytest._ledger import write
+
+    path = Path(tmp_path) / "ledger.json"
+    write(path, "old")
+
+    def refuse(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError):
+        write(path, "new")
+    assert path.read_text() == "old"
+    assert [p.name for p in path.parent.iterdir()] == ["ledger.json"]

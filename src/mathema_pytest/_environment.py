@@ -19,7 +19,7 @@ import os
 import platform
 import re
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from importlib import metadata
 
 from ._digest import json_digest
@@ -42,14 +42,18 @@ def _normalise(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def loaded_distributions(module_names: Iterable[str]) -> dict[str, str]:
+def loaded_distributions(module_names: Iterable[str],
+                         providers: Mapping[str, list[str]] | None = None
+                         ) -> dict[str, str]:
     """Intent:
         The distributions providing the top-level packages of
         `module_names`, as normalised name to version. Modules no
         installed distribution provides (the standard library, the
-        project's own uninstalled code) contribute nothing.
+        project's own uninstalled code) contribute nothing. `providers`
+        is `metadata.packages_distributions()` when the caller has it.
     """
-    providers = metadata.packages_distributions()
+    if providers is None:
+        providers = metadata.packages_distributions()
     found: dict[str, str] = {}
     for top in {name.partition(".")[0] for name in module_names}:
         for dist in providers.get(top, ()):

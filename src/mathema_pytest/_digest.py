@@ -72,6 +72,13 @@ def _prefixed(value: Any, exact: type, body: str) -> str:
     return _type_name(value) + ":" + body
 
 
+def type_only(value: Any) -> str:
+    """Intent:
+        The canonical form of a value that cannot be read: its type name.
+    """
+    return "o" + _type_name(value)
+
+
 def encode(value: Any, depth: int = 0) -> str:
     """Intent:
         A canonical text form of `value`: equal for equal values of the

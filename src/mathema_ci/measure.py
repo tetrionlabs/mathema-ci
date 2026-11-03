@@ -25,10 +25,15 @@ pytest unchanged.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -57,8 +62,8 @@ from .readme import (
 )
 from .render import render_triangle
 
-__all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "main",
-           "modules_in_report", "parse_args", "project_function_key", "run",
+__all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "SuiteStatus",
+           "assess_session", "main", "modules_in_report", "parse_args", "project_function_key", "run",
            "suite_command"]
 
 LEDGER_OPTION = "--mathema-test-ledger"
@@ -67,6 +72,20 @@ LEDGER_PATH = ".mathema/tests/ledger.json"
 # pytest's exit statuses for a run that did not complete: interrupted,
 # internal error, usage error. Nothing was measured, so nothing is scored.
 _INCOMPLETE = (2, 3, 4)
+
+# pytest's exit status for a run that collected no test.
+_NO_TESTS = 5
+
+# The module that tells measure what became of the session, loaded by name so
+# that it runs whatever plugins the project turns off, and the variable that
+# names the file it writes.
+SESSION_PLUGIN = "mathema_pytest._session"
+SESSION_VARIABLE = "MATHEMA_CI_SESSION"
+
+# How long pytest has to stop by itself after an interrupt before measure
+# passes the interrupt on, and how often measure looks, both in seconds.
+_INTERRUPT_GRACE = 2.0
+_POLL_SECONDS = 0.1
 
 # Each score and what it means to someone reading it for the first time.
 _SCORES = (("implementation", "lines your tests, probes or proofs ran"),
@@ -88,6 +107,23 @@ class Verified(Protocol):
     def adjudicated(self) -> int: ...
     @property
     def nothing_declared(self) -> bool: ...
+
+
+class SuiteStatus(int):
+    """pytest's exit status, with what the session recorded beside it:
+    `measured` is False when the run gives nothing to measure, `why` says
+    so in words, and `notes` are what to check before relying on the
+    scores of a run that did measure."""
+
+    measured: bool
+    why: str | None
+    notes: tuple[str, ...]
+
+    def __new__(cls, status: int, *, measured: bool = True, why: str | None = None,
+                notes: tuple[str, ...] = ()) -> SuiteStatus:
+        made = super().__new__(cls, status)
+        made.measured, made.why, made.notes = measured, why, notes
+        return made
 
 
 def incomplete(status: int) -> bool:
@@ -156,9 +192,10 @@ def parse_args(argv: list[str]) -> Options:
 def suite_command(options: Options) -> list[str]:
     """The command that runs the suite: pytest under `coverage run` in
     parallel mode, so each xdist worker writes its own data file, with
-    the test ledger on and pytest's own arguments last."""
+    the session recorder and the test ledger on and pytest's own arguments
+    last."""
     cmd = [sys.executable, "-m", "coverage", "run", "--parallel-mode",
-           "-m", "pytest", LEDGER_OPTION, LEDGER_PATH]
+           "-m", "pytest", "-p", SESSION_PLUGIN, LEDGER_OPTION, LEDGER_PATH]
     if options.junit:
         cmd.append(f"--junitxml={options.junit}")
     return cmd + list(options.pytest_args)
@@ -211,13 +248,85 @@ def _coverage_env(root: str) -> dict[str, str]:
     return dict(os.environ, COVERAGE_PROCESS_CONFIG=config)
 
 
+def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_GRACE) -> int:
+    """Intent:
+        `proc`'s exit status, with this process's signals passed on while it
+        runs: a termination signal at once, and an interrupt after `grace`
+        seconds, since a terminal's Ctrl-C reaches the whole process group
+        and pytest is then already stopping. An interrupt is never raised
+        here.
+    """
+    interrupted_at: list[float] = []
+
+    def on_interrupt(signum, frame) -> None:
+        interrupted_at.append(time.monotonic())
+
+    def on_terminate(signum, frame) -> None:
+        with contextlib.suppress(OSError):
+            proc.send_signal(signum)
+
+    previous = {}
+    handlers = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
+    if hasattr(signal, "SIGHUP"):
+        handlers[signal.SIGHUP] = on_terminate
+    try:
+        for signum, handler in handlers.items():
+            previous[signum] = signal.signal(signum, handler)
+    except ValueError:
+        previous = {}
+    try:
+        while True:
+            try:
+                return proc.wait(timeout=_POLL_SECONDS)
+            except subprocess.TimeoutExpired:
+                if interrupted_at and time.monotonic() - interrupted_at[0] >= grace:
+                    interrupted_at.clear()
+                    with contextlib.suppress(OSError):
+                        proc.send_signal(signal.SIGINT)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _read_session(path: str) -> dict | None:
+    """Intent:
+        What the session recorder wrote at `path`, or None when pytest
+        stopped before it could write.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def assess_session(status: int, session: dict | None) -> SuiteStatus:
+    """What a finished pytest process gave: whether it gives anything to
+    measure, from its exit status and what its session recorded. A status
+    of pytest's own for an incomplete run, a signal, a session that left
+    no record or stopped before its end, and a session in which no test
+    ran, all measure nothing."""
+    if incomplete(status):
+        return SuiteStatus(status, measured=False)
+    if session is None:
+        return SuiteStatus(status, measured=False,
+                           why=f"pytest stopped before it finished (exit status {status})")
+    if status == _NO_TESTS or session.get("tests", 0) == 0 or not session.get("started"):
+        return SuiteStatus(status, measured=False, why="pytest ran no tests")
+    if not session.get("complete"):
+        return SuiteStatus(status, measured=False,
+                           why=f"pytest stopped before the tests completed (exit status {status})")
+    return SuiteStatus(status)
+
+
 def run_suite_under_coverage(options: Options, root: str) -> int:
     """Run the suite under coverage in `root`, its output streamed to
     this process's own, and return pytest's exit status (negative when a
-    signal killed it). Earlier coverage data is erased first; afterwards
-    the per-process data files are combined and exported to
-    `coverage.json`, which mathema reads, so a failing test still leaves
-    the lines every other test ran. A run that did not complete leaves
+    signal killed it) as a `SuiteStatus`. Earlier coverage data is erased
+    first; afterwards the per-process data files are combined and exported
+    to `coverage.json`, which mathema reads, so a failing test still leaves
+    the lines every other test ran. A run with nothing to measure leaves
     the last `coverage.json` as it was and its own data is erased."""
     def coverage_cmd(*args: str) -> None:
         subprocess.run([sys.executable, "-m", "coverage", *args], cwd=root,
@@ -225,14 +334,21 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
 
     _erase_coverage(root)
     os.makedirs(os.path.join(root, os.path.dirname(LEDGER_PATH)), exist_ok=True)
-    status = subprocess.run(suite_command(options), cwd=root,
-                            env=_coverage_env(root)).returncode
-    if incomplete(status):
+    held = tempfile.mkdtemp(prefix="mathema-ci-")
+    try:
+        session_path = os.path.join(held, "session.json")
+        env = dict(_coverage_env(root), **{SESSION_VARIABLE: session_path})
+        status = _wait_passing_signals(subprocess.Popen(suite_command(options),
+                                                        cwd=root, env=env))
+        result = assess_session(status, _read_session(session_path))
+    finally:
+        shutil.rmtree(held, ignore_errors=True)
+    if not result.measured:
         _erase_coverage(root)
-        return status
+        return result
     coverage_cmd("combine", "--quiet")
     coverage_cmd("json", "--quiet", "-o", "coverage.json")
-    return status
+    return result
 
 
 def _importable(root: str) -> None:
@@ -550,6 +666,21 @@ def _notes_of(reader: Reader | None) -> Callable[[Claim], Sequence[str]]:
     return notes
 
 
+def _nothing_measured(status: int) -> str:
+    """Intent:
+        Why a run gives nothing to measure, in words, from its exit status
+        and what its session recorded.
+    """
+    why = getattr(status, "why", None)
+    if why is not None:
+        return why
+    if status < 0:
+        return f"pytest was killed by signal {-status} before the tests completed"
+    if status == _NO_TESTS:
+        return "pytest ran no tests"
+    return f"pytest exited {int(status)} before the tests completed"
+
+
 def run(options: Options, *, root: str,
         run_suite: Callable[[Options, str], int],
         reader: Reader | None,
@@ -565,12 +696,9 @@ def run(options: Options, *, root: str,
     of its functions. Returns the tests' exit status, whatever was found
     or failed after them: 128 plus the signal when a signal killed pytest."""
     status = run_suite(options, root)
-    if incomplete(status):
-        said = (f"pytest was killed by signal {-status}" if status < 0
-                else f"pytest exited {status}")
-        print(f"measure: {said} before the tests completed; nothing measured",
-              file=sys.stderr)
-        return 128 - status if status < 0 else status
+    if incomplete(status) or status == _NO_TESTS or not getattr(status, "measured", True):
+        print(f"measure: {_nothing_measured(status)}; nothing measured", file=sys.stderr)
+        return 128 - status if status < 0 else int(status)
 
     reading = staging = None
     trouble: list[str] = []
