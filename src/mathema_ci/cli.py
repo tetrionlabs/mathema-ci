@@ -2,11 +2,10 @@
 # Copyright 2026 Tetrion Ltd
 """The `mathema-ci` command.
 
-`mathema-ci measure` is the one CI stage: it runs the project's tests
-under coverage with the test ledger on, scores the project through
-mathema, writes the artifacts and the report page, keeps the README
-block current, and exits as the tests did. Core's `mathema measure`
-calls the same `mathema_ci.measure.main`.
+`mathema-ci measure` runs the project's tests under coverage with the
+test ledger on, scores the project through mathema, prints what it
+found, keeps the README block current, writes the badge files when asked,
+and exits as the tests did.
 """
 from __future__ import annotations
 
@@ -23,8 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="mathema-ci",
-        description="mathema in CI: tests, coverage, the triangle and the "
-                    "report page from one stage.")
+        description="mathema in CI: run the tests, measure the project and "
+                    "keep the triangle in your README, from one command.")
     parser.add_argument("--version", action="version",
                         version=f"mathema-ci {__version__}")
     sub = parser.add_subparsers(dest="command")

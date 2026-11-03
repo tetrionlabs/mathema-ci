@@ -26,7 +26,7 @@ from mathema_ci.readme import (
     readme_block,
 )
 
-BASE = "https://raw.githubusercontent.com/acme/billing/mathema-badges/main"
+BASE = "https://raw.githubusercontent.com/acme/billing/HEAD/.mathema/badges"
 
 
 def test_the_block_reads_the_badges_branch_and_links_the_triangle():
@@ -73,7 +73,7 @@ def test_a_readme_with_no_h1_gets_the_block_at_the_top():
 def test_a_later_run_rewrites_between_the_markers_only():
     first = place_block("# billing\n\nInvoices.\n", readme_block(BASE))
     edited = first.replace("Invoices.", "Invoices, paid on time.")
-    other = "https://raw.githubusercontent.com/acme/ledger/mathema-badges/main"
+    other = "https://raw.githubusercontent.com/acme/ledger/HEAD/.mathema/badges"
     out = place_block(edited, readme_block(other))
     assert out == edited.replace(BASE, other)
     assert out.count(MARKER_START) == 1 and out.count(MARKER_END) == 1
@@ -103,19 +103,46 @@ def test_a_former_marker_is_ordinary_text():
 
 
 def test_the_badges_base_follows_the_origin_remote():
+    files = "https://raw.githubusercontent.com/acme/billing/HEAD/.mathema/badges"
     for url in ("https://github.com/acme/billing.git",
                 "git@github.com:acme/billing.git",
                 "ssh://git@github.com/acme/billing"):
-        assert badges_base(url) == BASE
+        assert badges_base(url) == files
     assert badges_base("https://gitlab.com/acme/tools/billing.git") == (
-        "https://gitlab.com/acme/tools/billing/-/raw/mathema-badges/main")
+        "https://gitlab.com/acme/tools/billing/-/raw/HEAD/.mathema/badges")
+    assert badges_base("https://github.com/acme/billing.git", "docs/badges") == (
+        "https://raw.githubusercontent.com/acme/billing/HEAD/docs/badges")
 
 
 def test_an_unknown_host_keeps_the_owner_repo_placeholder():
     placeholder = ("https://raw.githubusercontent.com/OWNER/REPO/"
-                   "mathema-badges/main")
+                   "HEAD/.mathema/badges")
     assert badges_base(None) == placeholder
     assert badges_base("https://example.org/acme/billing.git") == placeholder
+
+
+def test_no_link_reads_a_branch_nothing_publishes():
+    assert "mathema-badges" not in readme_block(badges_base(None))
+
+
+def test_the_readme_says_how_its_images_appear_until_the_files_exist(tmp_path, capsys):
+    (tmp_path / "README.md").write_text("# billing\n")
+    _measure(tmp_path, [])
+    assert ("README: added the badges block; its images show once the badge files "
+            "are committed: run mathema-ci measure --out and commit .mathema/badges\n"
+            ) in capsys.readouterr().out
+    (tmp_path / "README.md").write_text("# billing\n")
+    _measure(tmp_path, ["--out"])
+    out = capsys.readouterr().out
+    assert "README: added the badges block\n" in out
+    assert (tmp_path / ".mathema" / "badges" / "triangle.svg").exists()
+
+
+def test_the_block_reads_the_directory_out_names(tmp_path):
+    (tmp_path / "README.md").write_text("# billing\n")
+    _measure(tmp_path, ["--out", "docs/badges"])
+    text = (tmp_path / "README.md").read_text()
+    assert "https://raw.githubusercontent.com/acme/billing/HEAD/docs/badges/triangle.svg" in text
 
 
 def _measure(tmp_path, argv, remote="https://github.com/acme/billing.git"):
@@ -124,7 +151,13 @@ def _measure(tmp_path, argv, remote="https://github.com/acme/billing.git"):
                remote=lambda root: remote, function_key=lambda root: None)
 
 
+def _committed_badges(root):
+    (root / ".mathema" / "badges").mkdir(parents=True)
+    (root / ".mathema" / "badges" / "triangle.svg").write_text("<svg/>")
+
+
 def test_measure_writes_the_block_by_default(tmp_path, capsys):
+    _committed_badges(tmp_path)
     readme = tmp_path / "README.md"
     readme.write_text("# billing\n\nInvoices.\n")
     _measure(tmp_path, [])
@@ -137,6 +170,7 @@ def test_measure_writes_the_block_by_default(tmp_path, capsys):
 
 
 def test_measure_says_when_it_updated_the_block(tmp_path, capsys):
+    _committed_badges(tmp_path)
     readme = tmp_path / "README.md"
     readme.write_text("# billing\n")
     _measure(tmp_path, [])
@@ -148,7 +182,7 @@ def test_measure_names_the_placeholder_when_there_is_no_known_remote(tmp_path, c
     (tmp_path / "README.md").write_text("# billing\n")
     _measure(tmp_path, [], remote=None)
     assert ("README: added the badges block; replace OWNER/REPO in its links "
-            "with your repository\n") in capsys.readouterr().out
+            "with your repository;") in capsys.readouterr().out
 
 
 def test_no_readme_leaves_the_readme_untouched(tmp_path):

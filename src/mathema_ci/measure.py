@@ -53,7 +53,6 @@ from .core_tests import (
     window_words,
 )
 from .readme import (
-    PLACEHOLDER_BASE,
     badges_base,
     has_block,
     marker_problem,
@@ -305,8 +304,8 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
     if hasattr(signal, "SIGHUP"):
         handlers[signal.SIGHUP] = on_terminate
     try:
-        for signum, handler in handlers.items():
-            previous[signum] = signal.signal(signum, handler)
+        for number, handler in handlers.items():
+            previous[number] = signal.signal(number, handler)
     except ValueError:
         previous = {}
     try:
@@ -749,7 +748,20 @@ def _replace_text(path: str, text: str) -> None:
         raise
 
 
-def _update_readme(options: Options, root: str, base: str) -> str | None:
+def badge_folder(options: Options, root: str) -> str:
+    """The badge directory the README block reads, relative to the project
+    root: `--out`'s directory when it lies inside the project, else the
+    standard one."""
+    if options.out is not None:
+        out = os.path.join(root, options.out)
+        rel = os.path.relpath(os.path.realpath(out), os.path.realpath(root))
+        if rel != os.curdir and not rel.startswith(os.pardir):
+            return PurePosixPath(*rel.split(os.sep)).as_posix()
+    return DEFAULT_BADGE_DIR
+
+
+def _update_readme(options: Options, root: str, base: str,
+                   folder: str = DEFAULT_BADGE_DIR) -> str | None:
     """Intent:
         Keep the README block current in `options.readme` and the line that
         says what was done: added, updated or why nothing was, and no line
@@ -775,8 +787,11 @@ def _update_readme(options: Options, root: str, base: str) -> str | None:
         return f"README: could not be read or written ({_in_plain_words(exc)})"
     done = "updated" if has_block(text) else "added"
     said = f"README: {done} the badges block"
-    if base == PLACEHOLDER_BASE:
+    if "/OWNER/REPO/" in base:
         said += "; replace OWNER/REPO in its links with your repository"
+    if not os.path.exists(os.path.join(root, folder, "triangle.svg")):
+        said += (f"; its images show once the badge files are committed: run "
+                 f"mathema-ci measure --out and commit {folder}")
     return said
 
 
@@ -965,18 +980,19 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
                                 getattr(status, "notes", ()), scored=scores is not None))
 
     closing: list[str] = []
-    if options.write_readme:
-        line, problem = _attempt(
-            lambda: _update_readme(options, root, badges_base(remote(root))))
-        if problem is not None:
-            line = f"README: could not be read or written ({problem})"
-        if line is not None:
-            closing.append(line)
     if options.out is not None:
         out = options.out
         lines, problem = _attempt(lambda: _write_badge_files(scores, out, root))
         closing += (lines or [] if problem is None
                     else [f"badge files could not be written ({problem})"])
+    if options.write_readme:
+        folder = badge_folder(options, root)
+        line, problem = _attempt(lambda: _update_readme(
+            options, root, badges_base(remote(root), folder), folder))
+        if problem is not None:
+            line = f"README: could not be read or written ({problem})"
+        if line is not None:
+            closing.append(line)
     sections.append(closing)
 
     _say("\n\n".join("\n".join(s) for s in sections if s))

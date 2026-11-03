@@ -11,10 +11,11 @@ mark, which stays first. A marker counts only on a line of its own outside
 code, so a README that shows the markers in a code block or in inline code
 is not mistaken for one that holds the block. One of each, start first, is
 a block; no marker at all is a README without one; anything else leaves the
-file alone, since which part is the block is then not known. The three shields and the
-triangle are read by raw URL from the `mathema-badges` branch, under
-`main/`, where CI publishes them, so the block renders wherever the
-README is shown. The triangle links to the page explaining how to read
+file alone, since which part is the block is then not known. The three
+shields and the triangle are read by raw URL from the badge files
+`measure --out` writes, committed in the project's default branch
+(`.mathema/badges/` unless `--out` names another directory), so the block
+renders wherever the README is shown once those files are committed. The triangle links to the page explaining how to read
 it, and no alt text carries a number, so a screen reader never states a
 score that may since have changed.
 """
@@ -31,34 +32,33 @@ MARKER_START = "<!-- mathema:badges:start -->"
 MARKER_END = "<!-- mathema:badges:end -->"
 TRIANGLE_DOCS = _DOCS_HOME + "your-own-triangle/"
 
-# The orphan branch CI publishes the badges to, and the folder in it that
-# holds the main branch's set.
-BADGES_BRANCH = "mathema-badges"
-BADGES_FOLDER = "main"
+# The badge directory `measure --out` writes by default, and the ref the
+# raw URLs read: HEAD, the repository's default branch.
+BADGES_FOLDER = ".mathema/badges"
+BADGES_REF = "HEAD"
 
 PLACEHOLDER_BASE = (f"https://raw.githubusercontent.com/OWNER/REPO/"
-                    f"{BADGES_BRANCH}/{BADGES_FOLDER}")
+                    f"{BADGES_REF}/{BADGES_FOLDER}")
 
 # host, then the repository path, from an https, ssh or scp-style remote
 _REMOTE = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?(?P<host>[^/:]+)[:/]"
                      r"(?P<path>.+?)(?:\.git)?/?$")
 
 
-def badges_base(remote: str | None) -> str:
+def badges_base(remote: str | None, folder: str = BADGES_FOLDER) -> str:
     """The raw URL the README reads the badge files from, for the git
-    remote `remote`: the `mathema-badges` branch's `main/` folder on
-    GitHub or GitLab. Any other host, or no remote, gives the
-    `OWNER/REPO` placeholder for the project to substitute."""
+    remote `remote`: `folder` (the badge directory, relative to the
+    project root) in the default branch on GitHub or GitLab. Any other
+    host, or no remote, gives the `OWNER/REPO` placeholder for the project
+    to substitute."""
+    folder = folder.strip("/")
     m = _REMOTE.match(remote.strip()) if remote else None
-    if m is None:
-        return PLACEHOLDER_BASE
-    host, path = m.group("host").lower(), m.group("path").strip("/")
+    host, path = (m.group("host").lower(), m.group("path").strip("/")) if m else ("", "")
     if host == "github.com" and path.count("/") == 1:
-        return (f"https://raw.githubusercontent.com/{path}/"
-                f"{BADGES_BRANCH}/{BADGES_FOLDER}")
+        return f"https://raw.githubusercontent.com/{path}/{BADGES_REF}/{folder}"
     if host == "gitlab.com" and "/" in path:
-        return f"https://gitlab.com/{path}/-/raw/{BADGES_BRANCH}/{BADGES_FOLDER}"
-    return PLACEHOLDER_BASE
+        return f"https://gitlab.com/{path}/-/raw/{BADGES_REF}/{folder}"
+    return f"https://raw.githubusercontent.com/OWNER/REPO/{BADGES_REF}/{folder}"
 
 
 def readme_block(base: str) -> str:

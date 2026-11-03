@@ -28,6 +28,12 @@ A relative path is resolved from the directory pytest was started in,
 and the option wins when both are given. The run's exit status is
 never changed by the plugin.
 
+The file is written only by a run that completed with at least one test.
+A run that was interrupted, stopped by `pytest.exit`, hit a collection or
+internal error, collected no test, or only listed or planned the tests
+(`--collect-only`, `--setup-plan`) leaves the last ledger as it was. A
+ledger that cannot be written is said on stderr and the last one stays.
+
 ## Schema 1
 
 The file is one JSON object with the schema number, `class_excludes`
@@ -50,7 +56,7 @@ digits.
 |---|---|
 | `framework` | `pytest`. The schema names the framework per row so other test runners can feed the same ledger later. |
 | `nodeid` | The test's id in its framework's own form, here pytest's nodeid (`tests/test_x.py::TestA::test_b[2]`). |
-| `identity` | The digest of what the test is made of: its own source, every fixture it uses and its parametrize values (see below). |
+| `identity` | The digest of what the test is made of: its own source, every fixture it uses and its parametrize values (see below). `null` when it could not be read: a test whose pytest-xdist worker crashed while running it, or one whose sources raised when read; `fixtures` and `files` are then empty. |
 | `class` | The environment class digest: platform, Python major.minor and the distributions the session imported, apart from those that run the tests. |
 | `environment` | The environment name, from `MATHEMA_ENV`, `local` when unset. |
 | `outcome` | `passed`, `failed`, `skipped`, `error` (setup or teardown failed), `xfailed` or `xpassed`. |
@@ -102,7 +108,7 @@ overrides) lists each.
 ### class and environment
 
 The environment name is a label a person gives the run: `MATHEMA_ENV`,
-`local` when it is unset, `ci` in mathema-ci's pipeline templates.
+`local` when it is unset, so a CI job sets it, for example to `ci`.
 The writer records it as given; checking it against the project's
 ranked list is the reader's job.
 
@@ -159,11 +165,14 @@ run-to-run noise.
 
 ## pytest-xdist
 
-Each worker builds the rows of the tests it ran and hands them, with
-the distributions it imported, to the controller when it shuts down.
-The controller merges them and writes the one file, so a parallel run
-writes the same rows as a serial one, `class` included, since
-pytest-xdist and execnet are left out of the class.
+Each worker builds a test's row as the test ends and hands it, with the
+distributions the worker imported since its last row, to the controller
+on the test's last report. The controller merges them and writes the one
+file, so a parallel run writes the same rows as a serial one, `class`
+included, since pytest-xdist and execnet are left out of the class. A
+worker that crashes keeps the rows of the tests it finished, and the test
+it crashed in gets a row with outcome `failed`, as pytest-xdist reports
+it, and identity `null`.
 
 ## What schema 1 leaves for later
 

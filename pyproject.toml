@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mathema-ci"
 dynamic = ["version"]
-description = "mathema in CI: run the tests, measure implementation, intent and clarity, and publish the triangle, from one stage on your own runners."
+description = "mathema in CI: run the tests, measure implementation, intent and clarity, and keep the triangle in your README, from one command."
 readme = "README.md"
 requires-python = ">=3.10"
 # Apache-2.0, as mathema-language: the algorithm and its licence are
@@ -13,10 +13,12 @@ requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
-# core's public API (repo_badges, BadgeScores, project_coverage) is the
+# core's public API (repo_badges, BadgeScores, verify_project) is the
 # contract; it moves on minor releases, so the range stops before the
-# next one. coverage is what measure runs the suite under.
-dependencies = ["mathema>=0.6.3,<0.7", "pyyaml>=6", "coverage>=7.10"]
+# next one. measure runs the suite with pytest under coverage, and needs
+# coverage's CoverageConfig.serialize, first in 7.10.3.
+dependencies = ["mathema>=0.6.3,<0.7", "pyyaml>=6", "coverage>=7.10.3",
+                "pytest>=8"]
 keywords = ["mathema", "continuous-integration", "code-coverage",
             "claim-driven-development", "github-actions", "gitlab-ci",
             "pytest-plugin", "software-verification"]
@@ -64,7 +66,7 @@ path = "src/mathema_ci/__init__.py"
 packages = ["src/mathema_ci", "src/mathema_pytest"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE",
+include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE",
            "NOTICE", "pyproject.toml"]
 
 [tool.pytest.ini_options]

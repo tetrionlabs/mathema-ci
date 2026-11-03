@@ -525,6 +525,7 @@ dependencies = [
     { name = "coverage", version = "7.16.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "coverage", version = "7.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "mathema" },
+    { name = "pytest" },
     { name = "pyyaml" },
 ]
 
@@ -539,9 +540,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", specifier = ">=7.10" },
+    { name = "coverage", specifier = ">=7.10.3" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
     { name = "mathema", specifier = ">=0.6.3,<0.7" },
+    { name = "pytest", specifier = ">=8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
