@@ -73,6 +73,8 @@ def test_an_ascii_terminal_keeps_the_status_and_gets_a_triangle(tmp_path, env, e
     assert "CLARITY" in done.stdout
     assert "What is known about your code" in done.stdout
     assert done.stdout.isascii()
+    triangle = done.stdout.split("CLARITY")[1].split("overall")[0]
+    assert "*" in triangle and "?" not in triangle
     assert "7 badge files written to b" in done.stdout
     assert "\N{BLACK DIAMOND}" in (root / "b" / "triangle.txt").read_text(encoding="utf-8")
 

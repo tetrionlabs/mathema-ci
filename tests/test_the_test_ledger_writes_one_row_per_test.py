@@ -336,3 +336,39 @@ def test_a_failed_write_leaves_the_last_ledger_and_no_temporary_file(tmp_path, m
         write(path, "new")
     assert path.read_text() == "old"
     assert [p.name for p in path.parent.iterdir()] == ["ledger.json"]
+
+
+def test_a_value_that_cannot_be_read_still_gives_an_identity(pytester):
+    _, ledger = _ledger_after(pytester, '''import pytest
+
+
+class Awkward(float):
+    def hex(self):
+        raise RuntimeError("no hex")
+
+
+@pytest.mark.parametrize("m", [Awkward(1.0)], ids=["a"])
+def test_a(m):
+    pass
+''')
+    assert ledger["rows"][0]["identity"] is not None
+    assert ledger["rows"][0]["files"] != []
+
+
+def test_a_test_whose_source_cannot_be_read_keeps_its_outcome(pytester):
+    pytester.makeconftest('''import inspect
+
+_read = inspect.getsource
+
+
+def _refuse(obj):
+    if getattr(obj, "__name__", "") == "test_a":
+        raise RuntimeError("no source today")
+    return _read(obj)
+
+
+inspect.getsource = _refuse
+''')
+    result, ledger = _ledger_after(pytester, "def test_a():\n    pass\n")
+    assert result.ret == 0
+    assert [(row["outcome"], row["identity"]) for row in ledger["rows"]] == [("passed", None)]
