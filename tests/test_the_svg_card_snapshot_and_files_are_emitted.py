@@ -21,7 +21,7 @@ def test_svg_and_snapshot_and_file_emission(tmp_path):
     assert ">48%</text>" in svg
     snap = ci_snapshot(sc)
     assert snap["overall"] == 48 and "pkg.f" in snap["per_function"]
-    written, pruned = write_badges(sc, str(tmp_path / "out"))
+    written, pruned, _ = write_badges(sc, str(tmp_path / "out"))
     assert pruned == []                 # a fresh directory prunes nothing
     names = {p.rsplit("/", 1)[-1] for p in written}
     assert {"triangle.txt", "triangle.svg", "snapshot.json",

@@ -182,3 +182,18 @@ def test_code_from_a_file_that_does_not_exist_still_gives_a_report(tmp_path):
     assert done.returncode == 0, done.stdout + done.stderr
     assert "coverage.json was not written" not in done.stdout
     assert "pricing.py" in (root / "coverage.json").read_text()
+
+
+def test_a_measure_started_with_sigint_ignored_still_stops_on_sigint(tmp_path):
+    root = _slow_project(tmp_path, duration=8)
+    proc = subprocess.Popen(
+        [os.path.join(BIN, "mathema-ci"), "measure", "--no-readme"],
+        cwd=root, env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True,
+        preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
+    _wait_for_the_test(root, proc)
+    os.killpg(proc.pid, signal.SIGINT)
+    out, err = proc.communicate(timeout=30)
+    assert proc.returncode == 2, out + err
+    assert not (root / "finished").exists()
+    assert "nothing measured" in err

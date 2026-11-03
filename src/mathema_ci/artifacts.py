@@ -4,23 +4,29 @@
 
 `write_badges` fills one directory with the ASCII triangle, the SVG card,
 the three shields.io payloads, a machine-readable snapshot for CI and a
-paste-ready README block, and records them in a manifest there. The
-directory may hold anything else: a file is removed only when the manifest
-shows measure wrote it and this run no longer writes it, so a retired badge
-is not served from a stale file and nothing of the project's is touched.
+paste-ready README block, seven files under fixed names, and records them
+in a manifest there. The directory may hold anything else. A file under one
+of the seven names is overwritten when the manifest recorded it or when it
+is what measure itself would have written, line endings aside, so a lost
+manifest or a checkout that rewrote line endings never stops the next run;
+a file of any other shape is never overwritten. A file is removed only when
+its name is a retired badge name, the manifest recorded it and it is
+unchanged since, so a retired badge is not served from a stale file and
+nothing of the project's is touched.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 
 from mathema.badges import BadgeScores
 
 from .render import render_svg, render_triangle, shields_payloads
 
-__all__ = ["DEFAULT_BADGE_DIR", "BadgeFilesInTheWay", "ci_snapshot",
-           "readme_snippet", "write_badges"]
+__all__ = ["BADGE_FILES", "DEFAULT_BADGE_DIR", "RETIRED_BADGE_FILES",
+           "BadgeFilesInTheWay", "ci_snapshot", "readme_snippet", "write_badges"]
 
 
 def ci_snapshot(scores: BadgeScores) -> dict:
@@ -53,6 +59,17 @@ DEFAULT_BADGE_DIR = ".mathema/badges"
 _MANIFEST = ".mathema-badges.json"
 _MANIFEST_SCHEMA = 1
 
+# The files measure writes, and the names earlier releases wrote that it
+# no longer does. Only a retired name is ever removed.
+BADGE_FILES = ("triangle.txt", "implementation.json", "intent.json", "clarity.json",
+               "triangle.svg", "snapshot.json", "readme-snippet.md")
+RETIRED_BADGE_FILES: tuple[str, ...] = ()
+
+# A score as the triangle text and the SVG write it: the dimension's name,
+# then its percentage or `unknown`.
+_SCORE = re.compile(r"\b(IMPL|INTENT|CLARITY)\b\s*(?:<[^>]*>\s*)*(\d+|unknown)")
+_OVERALL = re.compile(r"(\d+|unknown)%?(?:</tspan>)?</text>\s*<text[^>]*>overall|overall (\d+|unknown)")
+
 
 class BadgeFilesInTheWay(OSError):
     """A badge file would overwrite a file measure did not write. Nothing
@@ -61,9 +78,65 @@ class BadgeFilesInTheWay(OSError):
 
 def _digest(data: bytes) -> str:
     """Intent:
-        The sha256 of `data` as lowercase hex.
+        The sha256 of `data` with CRLF line endings read as LF, as lowercase
+        hex, so a checkout that rewrote the line endings digests alike.
     """
-    return hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _score(word: str) -> int | None:
+    """Intent:
+        A score as written, `unknown` being None.
+    """
+    return None if word == "unknown" else int(word)
+
+
+def _scores_stated(text: str) -> BadgeScores | None:
+    """Intent:
+        The scores a triangle text or SVG states, read from its labels, or
+        None when it does not state all three.
+    """
+    found = dict(_SCORE.findall(text))
+    if set(found) != {"IMPL", "INTENT", "CLARITY"}:
+        return None
+    overall = _OVERALL.search(text)
+    word = (overall.group(1) or overall.group(2)) if overall else "unknown"
+    intent, clarity = _score(found["INTENT"]), _score(found["CLARITY"])
+    if intent is None or clarity is None:
+        return None
+    return BadgeScores(_score(found["IMPL"]), intent, clarity, _score(word),
+                       per_function={})
+
+
+def _would_write(name: str, data: bytes) -> bool:
+    """Intent:
+        Whether `data`, with CRLF read as LF, is what measure writes under
+        `name` for some scores: the scores the file states are read back
+        and the file rendered again from them.
+    """
+    text = data.replace(b"\r\n", b"\n").decode("utf-8", "replace")
+    try:
+        if name == "readme-snippet.md":
+            return text == readme_snippet()
+        if name in ("triangle.txt", "triangle.svg"):
+            scores = _scores_stated(text)
+            if scores is None:
+                return False
+            return text == _planned_files(scores)[name].decode("utf-8")
+        if name == "snapshot.json":
+            found = json.loads(text)
+            scores = BadgeScores(found["implementation"], found["intent"],
+                                 found["clarity"], found["overall"],
+                                 per_function=found["per_function"],
+                                 algo=found["clarity_algo"],
+                                 capped={key: tuple(steps)
+                                         for key, steps in found.get("capped", [])})
+            return text == _planned_files(scores)[name].decode("utf-8")
+        value = _score(json.loads(text)["message"].rstrip("%"))
+        scores = BadgeScores(value, value or 0, value or 0, None, per_function={})
+        return text == _planned_files(scores)[name].decode("utf-8")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
 
 
 def _read_manifest(out_dir: str) -> dict[str, str]:
@@ -101,8 +174,9 @@ def _in_the_way(planned: dict[str, bytes], recorded: dict[str, str],
                 out_dir: str) -> list[str]:
     """Intent:
         The names in `planned` whose path already holds something measure
-        did not write: not the bytes it is about to write, and not the
-        bytes the manifest recorded.
+        did not write: not the bytes it is about to write, not the bytes
+        the manifest recorded, and not a file measure would write for the
+        scores it states.
     """
     found = []
     for name, data in planned.items():
@@ -110,9 +184,16 @@ def _in_the_way(planned: dict[str, bytes], recorded: dict[str, str],
         if not os.path.lexists(path):
             continue
         digest = _file_digest(path)
-        if digest is None or digest not in (_digest(data), recorded.get(name)):
+        if digest is not None and digest in (_digest(data), recorded.get(name)):
+            continue
+        try:
+            with open(path, "rb") as fh:
+                held = fh.read()
+        except OSError:
+            held = None
+        if held is None or digest is None or not _would_write(name, held):
             found.append(name)
-    return found
+    return sorted(found)
 
 
 def _write_atomically(path: str, data: bytes) -> None:
@@ -146,25 +227,28 @@ def _planned_files(scores: BadgeScores) -> dict[str, bytes]:
     return {name: text.encode("utf-8") for name, text in texts.items()}
 
 
-def write_badges(scores: BadgeScores, out_dir: str) -> tuple[list, list]:
+def write_badges(scores: BadgeScores, out_dir: str, *,
+                 owned: bool = False) -> tuple[list, list, list]:
     """Write the badge artifacts under `out_dir`: `triangle.txt` (the
     ASCII triangle), one shields JSON per badge, `triangle.svg`,
     `snapshot.json`, `readme-snippet.md` (a paste-ready block for a
     project's README), and the manifest `.mathema-badges.json`.
 
-    A file is removed only when the manifest of the last run names it, this
-    run does not write it, and it still holds the bytes measure wrote, so a
-    renamed or retired badge goes and nothing else does. A badge file that
+    A file is removed only when its name is in `RETIRED_BADGE_FILES`, the
+    manifest of the last run names it, and it still holds the bytes measure
+    wrote, so a retired badge goes and nothing else does. A badge file that
     would overwrite something measure did not write raises
-    `BadgeFilesInTheWay` before anything is written. Returns
-    `(written, pruned)` paths, the manifest not among them, so the removal
-    is never silent.
+    `BadgeFilesInTheWay` before anything is written, unless the directory
+    is `owned`: measure's own badge directory, where its seven names are
+    its own and such a file is adopted. Returns `(written, pruned,
+    adopted)` paths, the manifest not among them, so neither a removal
+    nor an adoption is silent.
     """
     os.makedirs(out_dir, exist_ok=True)
     planned = _planned_files(scores)
     recorded = _read_manifest(out_dir)
     blocking = _in_the_way(planned, recorded, out_dir)
-    if blocking:
+    if blocking and not owned:
         raise BadgeFilesInTheWay(
             f"{', '.join(blocking)} in {out_dir} not written by measure; move "
             "them or choose another directory")
@@ -178,14 +262,14 @@ def write_badges(scores: BadgeScores, out_dir: str) -> tuple[list, list]:
     pruned = []
     for name, digest in sorted(recorded.items()):
         path = os.path.join(out_dir, name)
-        if name not in planned and name != _MANIFEST and _file_digest(path) == digest:
+        if name in RETIRED_BADGE_FILES and name not in planned and _file_digest(path) == digest:
             os.remove(path)
             pruned.append(path)
     manifest = {"schema": _MANIFEST_SCHEMA,
                 "files": {name: _digest(data) for name, data in planned.items()}}
     _write_atomically(os.path.join(out_dir, _MANIFEST),
                       (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8"))
-    return written, pruned
+    return written, pruned, sorted(blocking)
 
 
 _DOCS_HOME = "https://mathema.tetrionlabs.com/"

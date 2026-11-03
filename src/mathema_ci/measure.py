@@ -281,26 +281,31 @@ def _descendants(pid: int) -> list[int]:
     return found
 
 
-def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_GRACE) -> int:
+def _run_passing_signals(command: list[str], *, cwd: str, env: dict[str, str],
+                         grace: float = _INTERRUPT_GRACE) -> int:
     """Intent:
-        `proc`'s exit status, with this process's signals passed on while it
-        runs: a termination signal at once, and an interrupt after `grace`
-        seconds, since a terminal's Ctrl-C reaches the whole process group
-        and pytest is then already stopping. An interrupt is never raised
-        here.
+        Run `command` and return its exit status, with this process's
+        signals passed on while it runs: a termination signal at once, and
+        an interrupt after `grace` seconds, since a terminal's Ctrl-C
+        reaches the whole process group and pytest is then already
+        stopping. The handlers go in before the child starts, so a child of
+        a measure that was started with a signal ignored still takes that
+        signal as a fresh process does. An interrupt is never raised here.
     """
     interrupted_at: list[float] = []
+    started: list[subprocess.Popen] = []
 
     def on_interrupt(signum, frame) -> None:
         interrupted_at.append(time.monotonic())
 
     def on_terminate(signum, frame) -> None:
-        for pid in [*_descendants(proc.pid), proc.pid]:
-            with contextlib.suppress(OSError):
-                os.kill(pid, signum)
+        for proc in started:
+            for pid in [*_descendants(proc.pid), proc.pid]:
+                with contextlib.suppress(OSError):
+                    os.kill(pid, signum)
 
     previous: dict[int, Any] = {}
-    handlers = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
+    handlers: dict[int, Any] = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
     if hasattr(signal, "SIGHUP"):
         handlers[signal.SIGHUP] = on_terminate
     try:
@@ -309,6 +314,8 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
     except ValueError:
         previous = {}
     try:
+        proc = subprocess.Popen(command, cwd=cwd, env=env)
+        started.append(proc)
         while True:
             try:
                 return proc.wait(timeout=_POLL_SECONDS)
@@ -318,8 +325,8 @@ def _wait_passing_signals(proc: subprocess.Popen, *, grace: float = _INTERRUPT_G
                     with contextlib.suppress(OSError):
                         proc.send_signal(signal.SIGINT)
     finally:
-        for signum, earlier in previous.items():
-            signal.signal(signum, earlier)
+        for number, earlier in previous.items():
+            signal.signal(number, earlier)
 
 
 def _read_session(path: str) -> dict | None:
@@ -443,7 +450,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     try:
         session_path = os.path.join(held, "session.json")
         env[SESSION_VARIABLE] = session_path
-        status = _wait_passing_signals(subprocess.Popen(command, cwd=root, env=env))
+        status = _run_passing_signals(command, cwd=root, env=env)
         session = _read_session(session_path)
         result = assess_session(status, session)
     finally:
@@ -805,13 +812,19 @@ def _write_badge_files(scores: BadgeScores | None, out: str, root: str) -> list[
     if scores is None:
         return ["no badge files written, there are no scores"]
     out_dir = out if os.path.isabs(out) else os.path.join(root, out)
+    owned = (os.path.realpath(out_dir)
+             == os.path.realpath(os.path.join(root, DEFAULT_BADGE_DIR)))
     try:
-        written, pruned = write_badges(scores, out_dir)
+        written, pruned, adopted = write_badges(scores, out_dir, owned=owned)
     except OSError as exc:
         return [f"badge files could not be written ({_in_plain_words(exc)})"]
-    return ([f"{len(written)} badge files written to {out}"]
-            + [f"removed an old badge file: {os.path.relpath(p, out_dir)}"
-               for p in pruned])
+    lines = [f"{len(written)} badge files written to {out}"]
+    if adopted:
+        lines.append(f"adopted {_plural(len(adopted), 'file', 'files')} already in "
+                     f"{DEFAULT_BADGE_DIR} that measure had not recorded: "
+                     + ", ".join(adopted))
+    return lines + [f"removed an old badge file: {os.path.relpath(p, out_dir)}"
+                    for p in pruned]
 
 
 def _read_and_stage(options: Options, reader: Reader, root: str
