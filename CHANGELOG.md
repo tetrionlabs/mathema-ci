@@ -26,6 +26,18 @@ Notable changes to mathema-ci are recorded here from its first public release on
   degrees apart with clarity at the top, so the shaded share of the frame
   is the overall. The ASCII triangle keeps its drawing, spokes from the
   middle of the base, and its shaded share is not the overall.
+- `mathema-ci gate` fails a change that makes a claim falsified or
+  unknown, or lowers clarity, on a function it touches, and lets debt
+  that was already there, or is on untouched functions, through. It runs
+  no tests: it reads the verified store after `mathema verify`. It finds
+  the base as HEAD^1 of GitHub's pull request merge commit, as
+  `CI_MERGE_REQUEST_DIFF_BASE_SHA` on GitLab (fetching it into a shallow
+  clone), or as the merge base with `--base REF`; reads the base's
+  verdicts from its committed store and its clarity from its committed
+  badges snapshot, from `--base-snapshot REF:PATH`, or with `--remeasure`
+  from a temporary worktree of the base commit; and exits 0, 1 or 2 as
+  `mathema verify` does. The CI workflows `init` writes carry it as an
+  optional step after verify.
 - `mathema-ci init` writes a pull or merge request template (what
   changed, claims added or changed, verdicts, accepted risks) and the CI
   workflow that runs `mathema verify`, for GitHub, GitLab or both, only

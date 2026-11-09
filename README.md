@@ -120,6 +120,36 @@ repository's default branch, so they show once you run `measure --out`
 and commit the badge directory. `--no-readme` leaves the README alone and
 `--readme PATH` keeps the block in another file.
 
+## gate
+
+`mathema-ci gate` fails a change that makes a claim falsified or unknown,
+or lowers clarity, on a function the change touches. Falsified and
+unknown claims that were already there, and those on functions the change
+did not touch, are listed and do not block. It runs no tests and
+adjudicates nothing: it reads the verified store, so in CI it runs after
+`mathema verify` has brought the store up to date.
+
+The base is HEAD^1 of the merge commit GitHub checks out for a pull
+request (give actions/checkout `fetch-depth: 2`), the merge request's
+`CI_MERGE_REQUEST_DIFF_BASE_SHA` on GitLab, fetched one commit deep when
+the clone lacks it, or with `--base REF` the merge base of REF and HEAD.
+A changed function is one whose lines on the head side, decorators
+included, the diff touches; one the base did not define is new. Each
+claim's verdict on the base is read from the base commit's committed
+store, and each function's clarity from its committed badges snapshot,
+`.mathema/badges/snapshot.json`; `--base-snapshot REF:PATH` reads the
+snapshot from somewhere else, a badges branch for example, and
+`--remeasure` instead works out the base's clarity for the changed
+functions in a temporary worktree of the base commit, which takes longer.
+Each side's functions are imported in a process of their own.
+
+For each changed function it prints the clarity on the base and the
+head, the difference and a grade (`lower`, `same`, `higher`,
+`new function`, `capped, not compared`), and under it each claim the
+change made falsified or unknown. `--format json` gives the same rows for
+a comment. It exits 0 with no finding, 1 with one and 2 when it cannot
+run, naming what is missing.
+
 ## init
 
 `mathema-ci init` writes a pull or merge request template and the CI
