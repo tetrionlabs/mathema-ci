@@ -12,7 +12,8 @@ def test_readme_snippet_states_the_meanings_and_links(tmp_path):
     assert "reached by a test, a probe or a derive proof" in text
     assert "explicitly specified" in text
     assert "pinned down" in text
-    assert "the area the three span" in text
+    assert "the mean of their three pairwise products" in text
+    assert "one empty score lowers it without emptying it" in text
     assert "know what your code actually does" in text
     # links resolve on the public docs site, never a private repository
     assert "https://mathema.tetrionlabs.com/modes/badges/#the-three-badges" in text

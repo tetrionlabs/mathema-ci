@@ -23,6 +23,7 @@ import re
 
 from mathema.badges import BadgeScores
 
+from .overall import overall as overall_score
 from .render import render_svg, render_triangle, shields_payloads
 
 __all__ = ["BADGE_FILES", "DEFAULT_BADGE_DIR", "RETIRED_BADGE_FILES",
@@ -40,7 +41,8 @@ def ci_snapshot(scores: BadgeScores) -> dict:
     out: dict = {"implementation": scores.implementation,
                  "intent": scores.intent,
                  "clarity": scores.clarity,
-                 "overall": scores.overall,
+                 "overall": overall_score(scores.implementation, scores.intent,
+                                          scores.clarity),
                  "clarity_algo": scores.algo,
                  "per_function": scores.per_function}
     if scores.capped:
@@ -282,8 +284,9 @@ _MEANINGS = (
                "specified", "#the-three-badges"),
     ("clarity", "how much of each function's knowable behaviour its "
                 "verified claims have pinned down", "#how-clarity-is-scored"),
-    ("overall", "the area the three span, so it falls toward zero when any "
-                "one of them is empty", "#the-triangle"),
+    ("overall", "the share of the triangle's frame the three cover, the mean "
+                "of their three pairwise products, so one empty score lowers "
+                "it without emptying it", "#the-triangle"),
 )
 
 

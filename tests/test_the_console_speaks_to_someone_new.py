@@ -36,6 +36,8 @@ from mathema_ci.measure import (
 )
 from mathema_ci.render import render_triangle
 
+pytestmark = pytest.mark.usefixtures("equal_wedges_on")
+
 KNOWN = """What is known about your code
   implementation   88%   lines your tests, probes or proofs ran
   intent           71%   docstring statements a claim checks

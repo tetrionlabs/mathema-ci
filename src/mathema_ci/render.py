@@ -13,11 +13,13 @@ corners. The full 100/100/100 triangle is the frame; each score is a
 point on its spoke from the base centre (all zero) out to its corner,
 and the triangle those three points span is the current state, so the
 gap to the frame is the room to grow. The overall number is
-`mathema.badges.triangle_area`, the share of the frame that shape covers.
+`mathema_ci.overall.overall`.
 """
 from __future__ import annotations
 
-from mathema.badges import BadgeScores, triangle_area
+from mathema.badges import BadgeScores
+
+from .overall import overall as overall_score
 
 __all__ = ["render_triangle", "render_svg", "shields_payloads"]
 
@@ -80,7 +82,7 @@ def render_triangle(a: int | None, b: int | None, c: int | None) -> str:
             return "unknown" if v is None else v
         return (f"IMPL {said(a)}   INTENT {said(b)}   CLARITY {said(c)}   "
                 f"overall unknown\n(no triangle: a dimension is unknown)")
-    overall = triangle_area(a, b, c)
+    overall = overall_score(a, b, c)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
     if min(a, b, c) < 5:
         return (f"IMPL {a}   INTENT {b}   CLARITY {c}   overall {overall}\n"
@@ -193,6 +195,7 @@ def render_svg(scores: BadgeScores) -> str:
     # The base labels start and end at their corners, so the figure is
     # as wide as the frame and centred on the card's mid-width too.
     w, h = 360, 300
+    overall = overall_score(scores.implementation, scores.intent, scores.clarity)
     apex = (180.0, 65.0)          # CLARITY, top
     left = (56.0, 233.0)          # IMPL, bottom-left
     right = (304.0, 233.0)        # INTENT, bottom-right
@@ -248,7 +251,7 @@ def render_svg(scores: BadgeScores) -> str:
     parts.append(f'<text x="{w - 20}" y="37" fill="{_PAPER}" '
                  f'font-family="{_DISPLAY_FONT}" font-size="20" '
                  f'font-weight="600" text-anchor="end">'
-                 f'{"unknown" if scores.overall is None else f"{scores.overall}%"}'
+                 f'{"unknown" if overall is None else f"{overall}%"}'
                  '</text>')
     parts.append(f'<text x="{w - 20}" y="51" fill="{_DMUTE}" font-size="10" '
                  'letter-spacing="1.2" text-anchor="end">overall</text>')

@@ -52,6 +52,7 @@ from .core_tests import (
     statement_notes,
     window_words,
 )
+from .overall import with_overall
 from .readme import (
     badges_base,
     has_block,
@@ -997,6 +998,8 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
 
     verified, stopped = _attempt(lambda: verify(root))
     scores, unscored = _attempt(lambda: score(root))
+    if scores is not None:
+        scores = with_overall(scores)
 
     nothing_declared = verified is not None and getattr(verified, "nothing_declared", False)
     sections: list[list[str]] = []
