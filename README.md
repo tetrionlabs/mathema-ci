@@ -120,6 +120,26 @@ repository's default branch, so they show once you run `measure --out`
 and commit the badge directory. `--no-readme` leaves the README alone and
 `--readme PATH` keeps the block in another file.
 
+## init
+
+`mathema-ci init` writes a pull or merge request template and the CI
+workflow that runs `mathema verify`, only where a file is missing; a file
+already there is never overwritten, and each path is reported as
+`written` or `kept, already there`. For GitHub that is
+`.github/pull_request_template.md` and
+`.github/workflows/mathema-verify.yml`; for GitLab,
+`.gitlab/merge_request_templates/Default.md` and `.gitlab-ci.mathema.yml`,
+with the lines to include it printed rather than written into
+`.gitlab-ci.yml`. `--provider github`, `gitlab` or `both` chooses; without
+it the provider is read from the project's files, then its `origin`
+remote, and `init` exits 2 when it cannot tell. `--dry-run` says what
+would be written and writes nothing.
+
+The template has four sections: what changed, the claims added or
+changed, the verdicts, and the accepted risks, in a table whose Expires
+column is the author's own note, since `mathema accept` records no
+expiry date.
+
 ## Layout
 
 - `src/mathema_ci/`: the `measure` command, the artifact writers, the

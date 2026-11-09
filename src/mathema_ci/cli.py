@@ -17,8 +17,8 @@ from . import __version__
 
 def build_parser() -> argparse.ArgumentParser:
     """Intent:
-        The argument parser for the console script: one subcommand,
-        `measure`, whose options arrive with the command itself.
+        The argument parser for the console script: its subcommands,
+        each of whose options arrive with the command itself.
     """
     parser = argparse.ArgumentParser(
         prog="mathema-ci",
@@ -28,19 +28,24 @@ def build_parser() -> argparse.ArgumentParser:
                         version=f"mathema-ci {__version__}")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("measure", help="run the tests and measure the project")
+    sub.add_parser("init", help="write the review template and CI workflow "
+                                "where they are missing")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     """Intent:
-        Parse the arguments and dispatch; `measure` hands every argument
-        after its name to `mathema_ci.measure.main`, which parses its
-        own options and passes those after `--` to pytest.
+        Parse the arguments and dispatch; each subcommand hands every
+        argument after its name to its own module's `main`, which parses
+        its own options (`measure` passes those after `--` to pytest).
     """
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["measure"]:
         from . import measure
         return measure.main(argv[1:])
+    if argv[:1] == ["init"]:
+        from . import init
+        return init.main(argv[1:])
     build_parser().parse_args(argv)
     build_parser().print_help()
     return 0

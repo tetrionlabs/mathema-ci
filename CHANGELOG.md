@@ -26,6 +26,13 @@ Notable changes to mathema-ci are recorded here from its first public release on
   degrees apart with clarity at the top, so the shaded share of the frame
   is the overall. The ASCII triangle keeps its drawing, spokes from the
   middle of the base, and its shaded share is not the overall.
+- `mathema-ci init` writes a pull or merge request template (what
+  changed, claims added or changed, verdicts, accepted risks) and the CI
+  workflow that runs `mathema verify`, for GitHub, GitLab or both, only
+  where a file is missing and never overwriting one. It reports each path
+  as written or kept, prints the GitLab include lines instead of editing
+  `.gitlab-ci.yml`, writes nothing under `--dry-run`, and exits 2 when it
+  cannot tell the provider.
 - `--target MODULE`, which can be repeated, scores every function defined
   in MODULE, the population `mathema badges MODULE` scores, and the hint
   for a first claim names a function from the targets. With no target

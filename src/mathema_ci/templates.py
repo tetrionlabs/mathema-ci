@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import os
 
-__all__ = ["CI_PROVIDERS", "CI_TEMPLATES", "write_ci_templates"]
+__all__ = ["CI_PROVIDERS", "CI_TEMPLATES", "REVIEW_TEMPLATE", "REVIEW_TEMPLATES",
+           "write_ci_templates"]
 
 
 # provider: (path relative to the project root, file body)
@@ -49,6 +50,13 @@ jobs:
       - run: mathema verify --root .
       # optional: the claim-level delta since the base, for a PR comment
       # - run: mathema review --format json --output review.json
+      # optional: fail on a newly falsified or unknown claim, or lower
+      # clarity, on the functions this pull request changes. The gate
+      # runs no tests: it reads the store verify has just brought up to
+      # date, and it needs the base commit, so give actions/checkout
+      # `with: fetch-depth: 2`. Existing debt elsewhere does not block.
+      # - run: pip install mathema-ci
+      # - run: mathema-ci gate
 """),
     "gitlab": (".gitlab-ci.mathema.yml", """\
 # mathema verify is the CI gate over the committed .mathema/ store.
@@ -66,10 +74,49 @@ mathema-verify:
     # the install line to however your project installs
     - pip install -e . mathema
     - mathema verify --root .
+    # optional, in merge request pipelines: fail on a newly falsified or
+    # unknown claim, or lower clarity, on the functions this merge
+    # request changes. The gate runs no tests: it reads the store verify
+    # has just brought up to date, and fetches the base commit itself.
+    # Existing debt elsewhere does not block.
+    # - pip install mathema-ci
+    # - mathema-ci gate
 """),
 }
 
 CI_PROVIDERS = tuple(CI_TEMPLATES)
+
+# The pull or merge request description a reviewer reads beside the
+# change: the same sections for both providers.
+REVIEW_TEMPLATE = """\
+## What changed
+
+<!-- The behaviour this change adds, removes or alters, in a sentence or two. -->
+
+## Claims added or changed
+
+<!-- Each claim key and its statement. For a claim removed or weakened, say why. -->
+
+## Verdicts
+
+<!-- The summary from `mathema verify`, or from `mathema-ci gate`. Name every
+     claim on changed code that is falsified or unknown. -->
+
+## Accepted risks
+
+<!-- Each claim accepted rather than fixed, and why. `mathema accept` records
+     no expiry date, so the Expires column is your own note of when to look
+     at the risk again. Leave the table empty when there are none. -->
+
+| Claim | Why it is accepted | Expires |
+|---|---|---|
+"""
+
+# provider: the path its review template is read from
+REVIEW_TEMPLATES: dict[str, str] = {
+    "github": ".github/pull_request_template.md",
+    "gitlab": ".gitlab/merge_request_templates/Default.md",
+}
 
 
 def write_ci_templates(root: str, provider: str = "github") -> list[str]:
