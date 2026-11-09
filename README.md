@@ -122,10 +122,15 @@ and commit the badge directory. `--no-readme` leaves the README alone and
 
 ## gate
 
-`mathema-ci gate` fails a change that makes a claim falsified or unknown,
-or lowers clarity, on a function the change touches. Falsified and
-unknown claims that were already there, and those on functions the change
-did not touch, are listed and do not block. It runs no tests and
+`mathema-ci gate` fails a change that makes a claim falsified,
+invalidated or unknown, or lowers clarity, on a function the change
+touches: the three verdicts `mathema verify` fails in every mode, each
+under its own name, an invalidated claim with the verdict it had and the
+one it regressed to. An unknown a person accepted as risk, a skipped
+claim, a claim mathema suggested itself and one in a foreign grammar do
+not block, as verify fails them only in strict mode or not at all. Claims
+already in their state on the base, and those on functions the change did
+not touch, are listed and do not block. It runs no tests and
 adjudicates nothing: it reads the verified store, so in CI it runs after
 `mathema verify` has brought the store up to date.
 
@@ -146,7 +151,7 @@ Each side's functions are imported in a process of their own.
 For each changed function it prints the clarity on the base and the
 head, the difference and a grade (`lower`, `same`, `higher`,
 `new function`, `capped, not compared`), and under it each claim the
-change made falsified or unknown. `--format json` gives the same rows for
+change made falsified, invalidated or unknown. `--format json` gives the same rows for
 a comment. It exits 0 with no finding, 1 with one and 2 when it cannot
 run, naming what is missing.
 

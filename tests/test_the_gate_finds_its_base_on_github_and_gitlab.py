@@ -64,6 +64,11 @@ HEAD_CALC = CALC.replace("return x * 2", "return x * 3").replace(
     def triple(x: float) -> float:
         """Return thrice x."""
         return x * 3
+
+
+    def quad(x: float) -> float:
+        """Return four times x."""
+        return x * 4
     ''')
 
 HEAD_CLAIMS = CLAIMS + textwrap.dedent('''\
@@ -71,6 +76,10 @@ HEAD_CLAIMS = CLAIMS + textwrap.dedent('''\
       claims:
         - name: triples
           statement: "for x in [0, 10], f(x) == 3 * x"
+    calc.quad:
+      claims:
+        - name: quintuples
+          statement: "for x in [0, 10], f(x) == 5 * x"
     ''')
 
 SNAPSHOT = """\
@@ -162,11 +171,17 @@ def test_on_a_github_merge_commit_the_base_is_head_s_first_parent(origin, tmp_pa
     main = _git(origin, "rev-parse", "--short=7", "main")
     out = done.stdout
     assert f"against the pull request base at {main} (HEAD^1)" in out
-    assert "changed functions   3 (1 new, 2 edited)" in out
-    assert "claim doubles" in out and "proven -> falsified" in out
-    assert "newly falsified: fails" in out
+    assert "changed functions   4 (2 new, 2 edited)" in out
+    # double's claim held on the base and the head code no longer supports it
+    assert "claim doubles" in out and "proven -> invalidated" in out
+    assert "newly invalidated (was proven, now falsified): fails" in out
+    # quad is new and its claim is false from the start
+    assert "claim quintuples" in out
+    line = next(ln for ln in out.splitlines() if "claim quintuples" in ln)
+    assert line.split()[2:] == ["falsified", "newly", "falsified:", "fails"]
     assert "calc.triple" in out and "new function" in out
-    assert "1 falsified and 0 unknown claims on functions this change did not touch" in out
+    assert ("1 falsified, 0 invalidated and 0 unknown claims on functions this change "
+            "did not touch") in out
     assert "PASSED" not in out and "passed in" not in out
 
 
@@ -210,9 +225,12 @@ def test_json_carries_the_rows(origin, tmp_path):
     doc = json.loads(done.stdout)
     assert doc["exit"] == done.returncode == 1
     keys = {row["key"]: row for row in doc["functions"]}
-    assert set(keys) == {"calc.double", "calc.half", "calc.triple"}
+    assert set(keys) == {"calc.double", "calc.half", "calc.triple", "calc.quad"}
     assert keys["calc.triple"]["kind"] == "new"
-    assert keys["calc.double"]["claims"][0]["grade"] == "newly falsified"
+    assert keys["calc.double"]["claims"][0]["grade"] == (
+        "newly invalidated (was proven, now falsified)")
+    assert keys["calc.quad"]["claims"][0]["grade"] == "newly falsified"
+    assert doc["debt"]["untouched_falsified"] == 1
     assert keys["calc.half"]["base_clarity"] is not None
 
 

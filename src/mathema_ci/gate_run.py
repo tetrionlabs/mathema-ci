@@ -13,8 +13,10 @@ verify, and compares each changed function with the base:
   HEAD;
 - the changed functions are those `git diff BASE HEAD` touches
   (`mathema_ci.diffmap`);
-- each claim's verdict on the base comes from mathema's `review`, which
-  reads the base commit's committed store;
+- each claim on either side is read from its record and classified by
+  the rules verify's gate applies (`mathema_ci.gate.claim_states`); the
+  base's records are those committed at the base commit, read with git
+  show as mathema's own `review` reads them;
 - each function's clarity on the head is mathema's `clarity_score` over
   the head's store, and on the base it is the base commit's committed
   badges snapshot, or with `--remeasure` `clarity_score` over a temporary
@@ -39,7 +41,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .diffmap import changed_functions, module_of, parse_diff
-from .gate import Side, exit_code, grade, render_json, render_text
+from .gate import Side, claim_states, exit_code, grade, render_json, render_text
 
 __all__ = ["Base", "GateError", "Probe", "find_base", "main", "probe"]
 
@@ -143,40 +145,34 @@ def probe(root: str, modules: list[str], keys: list[str]) -> Probe:
 _probe = probe
 
 
-def _verdicts(store: Mapping[str, Mapping]) -> dict[str, dict[str, str]]:
+def _states(store: Mapping[str, Mapping]) -> dict[str, dict]:
     """Intent:
-        `{key: {claim: verdict}}` for every record in a loaded verified
-        store.
+        `{key: {claim: ClaimState}}` for every record in a store mapping a
+        key to its record entry.
     """
-    out: dict[str, dict[str, str]] = {}
-    for key, info in store.items():
-        entry = info.get("entry", info) if isinstance(info, Mapping) else {}
-        out[key] = {c["name"]: c.get("verdict") or "" for c in entry.get("claims") or []
-                    if isinstance(c, Mapping) and c.get("name")}
-    return out
+    return {key: claim_states(list((entry or {}).get("claims") or []))
+            for key, entry in store.items() if isinstance(entry, Mapping)}
 
 
-def _base_verdicts(root: str, sha: str, head: Mapping[str, Mapping[str, str]],
-                   keys: list[str]) -> dict[str, dict[str, str]]:
+def _records_at(root: str, sha: str) -> dict[str, Mapping]:
     """Intent:
-        Each of `keys`' claim verdicts on the base, from mathema's
-        `review` of the store at `sha` against the working tree: a claim
-        `review` lists as added was not on the base, one it lists as
-        flipped had its `from` verdict there, and every other claim had
-        the verdict it has now.
+        `{key: entry}` for every verified record committed at `sha`, read
+        with git show as mathema's own `review` reads them.
     """
-    from mathema.review import review
+    import yaml
 
-    changes = {c["key"]: c for c in review(root, ref=sha)["changes"]}
-    out = {}
-    for key in keys:
-        named = dict(head.get(key) or {})
-        change = changes.get(key) or {}
-        for name in change.get("added", []):
-            named.pop(name, None)
-        for flip in change.get("flipped", []):
-            named[flip["claim"]] = flip["from"]
-        out[key] = named
+    listing = _git(root, "ls-tree", "-r", "--name-only", sha, "--", STORE_PATH).stdout
+    out: dict[str, Mapping] = {}
+    for path in listing.splitlines():
+        if not path.endswith(".yaml"):
+            continue
+        done = _git(root, "show", f"{sha}:{path}")
+        try:
+            doc = yaml.safe_load(done.stdout) if done.returncode == 0 else None
+        except yaml.YAMLError:
+            raise GateError(f"the record {path} at {sha[:7]} is not readable YAML") from None
+        if isinstance(doc, Mapping):
+            out.update(doc)
     return out
 
 
@@ -229,21 +225,23 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
     base_sources = {c.base_path: _git(root, "show", f"{base.sha}:{c.base_path}").stdout
                     for c in changes if c.base_path}
     changed = changed_functions(changes, head_sources, base_sources)
-    head_verdicts = _verdicts(load_verified(root))
+    head_states = _states({key: info.get("entry") or {}
+                           for key, info in load_verified(root).items()
+                           if isinstance(info, Mapping)})
     empty = Side({}, {}, frozenset(), CLARITY_ALGO)
     if not changed:
-        return grade({}, empty, Side(head_verdicts, {}, frozenset(), CLARITY_ALGO))
+        return grade({}, empty, Side(head_states, {}, frozenset(), CLARITY_ALGO))
 
-    has_store = bool(_git(root, "ls-tree", "-r", "--name-only", base.sha, "--",
-                          STORE_PATH).stdout.strip())
-    if not has_store and not remeasure:
+    base_records = _records_at(root, base.sha)
+    if not base_records and not remeasure:
         raise GateError(f"the base commit {base.sha[:7]} has no committed {STORE_PATH}; pass "
                         "--remeasure to work the base out (slower)")
     head_modules = [m for c in changes if (m := module_of(c.path))]
     head = _probe(root, head_modules, list(changed))
     changed = {k: kind for k, kind in changed.items() if k in head.clarity}
     edited = [k for k, kind in changed.items() if kind == "edited"]
-    base_claims = _base_verdicts(root, base.sha, head_verdicts, edited)
+    base_states = _states(base_records)
+    base_claims = {k: base_states[k] for k in edited if k in base_states}
 
     if remeasure:
         base_modules = [m for c in changes if c.base_path and (m := module_of(c.base_path))]
@@ -256,7 +254,7 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
         capped = frozenset(key for key, steps in snap.get("capped") or []
                            if "clarity" in steps)
         base_side = Side(base_claims, clarity, capped, snap.get("clarity_algo"))
-    head_side = Side(head_verdicts, dict(head.clarity), frozenset(), CLARITY_ALGO)
+    head_side = Side(head_states, dict(head.clarity), frozenset(), CLARITY_ALGO)
     return grade(changed, base_side, head_side)
 
 

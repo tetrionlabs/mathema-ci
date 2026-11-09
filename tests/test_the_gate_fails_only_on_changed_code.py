@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import json
 
-from mathema_ci.gate import Side, exit_code, grade, render_json, render_text
+from mathema_ci.gate import Side, claim_states, exit_code, grade, render_json, render_text
 
 ALGO = "entropy-dimensions@1.4"
 
 
 def _side(claims=None, clarity=None, capped=(), algo=ALGO):
-    return Side(claims=claims or {}, clarity=clarity or {}, capped=frozenset(capped),
-                algo=algo)
+    """A side whose claims are given as `{key: {name: verdict}}`, or as
+    `{key: [claim dict, ...]}` when a claim needs more than its verdict."""
+    states = {key: claim_states(named if isinstance(named, list) else
+                                [{"name": n, "verdict": v} for n, v in named.items()])
+              for key, named in (claims or {}).items()}
+    return Side(claims=states, clarity=clarity or {}, capped=frozenset(capped), algo=algo)
 
 
 def test_lower_clarity_on_an_edited_function_fails():
@@ -71,7 +75,8 @@ def test_debt_on_untouched_functions_is_counted_and_does_not_block():
                  clarity={"m.f": 50})
     report = grade({"m.f": "edited"}, _side(clarity={"m.f": 50}, claims={"m.f": {"a": "holds"}}),
                    head)
-    assert (report.untouched_falsified, report.untouched_unknown) == (2, 1)
+    assert (report.untouched_falsified, report.untouched_invalidated,
+            report.untouched_unknown) == (2, 0, 1)
     assert exit_code(report) == 0
 
 
@@ -124,7 +129,7 @@ Gate on changed code, against main at 4252a3b (merge base)
   m.h               clarity 30% -> 30%     0   same
 
 Existing debt, not blocking
-  1 falsified and 0 unknown claims on functions this change did not touch
+  1 falsified, 0 invalidated and 0 unknown claims on functions this change did not touch
 
 Result: fails, 3 findings on changed code (exit 1)"""
 
@@ -147,4 +152,89 @@ def test_the_json_carries_the_same_rows():
                    "difference": -11, "grade": "lower", "fails": True,
                    "claims": [{"name": "rounds", "base": "holds", "head": "falsified",
                                "grade": "newly falsified", "fails": True}]}
-    assert doc["debt"] == {"untouched_falsified": 0, "untouched_unknown": 0, "carried": 0}
+    assert doc["debt"] == {"untouched_falsified": 0, "untouched_invalidated": 0,
+                           "untouched_unknown": 0, "carried": 0}
+
+
+INVALIDATED = {"name": "doubles", "verdict": "invalidated",
+               "meta": {"mathema.previous_verdict": "proven",
+                        "mathema.regressed_to": "falsified"}}
+
+
+def test_a_regression_is_invalidated_under_its_own_name():
+    base = _side(claims={"m.f": {"doubles": "proven"}}, clarity={"m.f": 43})
+    head = _side(claims={"m.f": [INVALIDATED]}, clarity={"m.f": 43})
+    report = grade({"m.f": "edited"}, base, head)
+    (claim,) = report.functions[0].claims
+    assert (claim.base, claim.head) == ("proven", "invalidated")
+    assert claim.grade == "newly invalidated (was proven, now falsified)"
+    assert claim.fails and exit_code(report) == 1
+    text = render_text(report, "main")
+    assert "proven -> invalidated" in text
+    assert "newly invalidated (was proven, now falsified): fails" in text
+    assert "newly falsified" not in text
+    doc = json.loads(render_json(report, "main"))
+    assert doc["functions"][0]["claims"][0]["head"] == "invalidated"
+    assert doc["functions"][0]["claims"][0]["regressed_to"] == "falsified"
+
+
+def test_a_fresh_falsified_claim_on_a_new_function_reads_as_falsified():
+    head = _side(claims={"m.g": {"quintuples": "falsified"}}, clarity={"m.g": 20})
+    report = grade({"m.g": "new"}, _side(), head)
+    (claim,) = report.functions[0].claims
+    assert (claim.base, claim.head, claim.grade) == (None, "falsified", "newly falsified")
+
+
+def test_untouched_invalidated_claims_are_counted_by_their_own_name():
+    head = _side(claims={"m.old": [INVALIDATED], "m.f": {"a": "holds"}}, clarity={"m.f": 1})
+    report = grade({"m.f": "edited"}, _side(claims={"m.f": {"a": "holds"}}, clarity={"m.f": 1}),
+                   head)
+    assert (report.untouched_falsified, report.untouched_invalidated) == (0, 1)
+    assert "0 falsified, 1 invalidated and 0 unknown claims" in render_text(report, "main")
+
+
+def test_what_does_not_block_and_why():
+    claims = [
+        {"name": "risk", "verdict": "skipped:unknown_but_accepted"},
+        {"name": "owned", "verdict": "unknown", "accepted": {"as": "risk"}},
+        {"name": "stale", "verdict": "unknown", "accepted": {"as": "risk", "stale": True}},
+        {"name": "misspec", "verdict": "skipped:misspecified"},
+        {"name": "hint", "verdict": "falsified", "meta": {"mathema.surface": "mathema"}},
+        {"name": "hint[float]", "verdict": "falsified",
+         "meta": {"mathema.companion_of": "hint"}},
+        {"name": "policy", "verdict": "falsified",
+         "meta": {"mathema.surface": "mathema", "mathema.policy": {"kind": "absent"}}},
+        {"name": "foreign", "verdict": "falsified", "meta": {"mathema.foreign_grammar": "x"}},
+        {"name": "fresh", "verdict": "declared"},
+    ]
+    states = claim_states(claims)
+    meanings = {name: state.meaning for name, state in states.items()}
+    assert meanings == {"risk": "accepted risk", "owned": "accepted risk", "stale": "unknown",
+                        "misspec": "skipped", "hint": "suggestion",
+                        "hint[float]": "suggestion", "policy": "falsified",
+                        "foreign": "foreign grammar", "fresh": "declared"}
+    assert {n for n, s in states.items() if s.blocks} == {"stale", "policy"}
+    assert all(s.why for s in states.values() if not s.blocks and s.meaning not in
+               ("proven", "holds"))
+
+
+def test_the_meanings_count_as_core_s_verify_gate_counts_them():
+    from mathema.verify import _accepted_risk, gate
+
+    claims = [
+        {"name": "a", "verdict": "proven"}, {"name": "b", "verdict": "holds"},
+        {"name": "c", "verdict": "falsified"}, INVALIDATED,
+        {"name": "e", "verdict": "unknown"},
+        {"name": "f", "verdict": "unknown", "accepted": {"as": "risk"}},
+        {"name": "g", "verdict": "skipped:unknown_but_accepted"},
+        {"name": "h", "verdict": "skipped:misspecified"},
+        {"name": "i", "verdict": "falsified", "meta": {"mathema.surface": "mathema"}},
+        {"name": "i[float]", "verdict": "falsified", "meta": {"mathema.companion_of": "i"}},
+        {"name": "j", "verdict": "unknown", "accepted": {"as": "risk", "stale": True}},
+    ]
+    core = gate(claims, strict=False, accepted_risk=_accepted_risk({"claims": claims}))
+    ours = [s.meaning for s in claim_states(claims).values()]
+    assert (ours.count("falsified"), ours.count("invalidated"), ours.count("unknown"),
+            ours.count("accepted risk"), ours.count("skipped"), ours.count("proven"),
+            ours.count("holds")) == (core.falsified, core.invalidated, core.unknown,
+                                     core.owned, core.skipped, core.proven, core.holds)

@@ -26,9 +26,12 @@ Notable changes to mathema-ci are recorded here from its first public release on
   degrees apart with clarity at the top, so the shaded share of the frame
   is the overall. The ASCII triangle keeps its drawing, spokes from the
   middle of the base, and its shaded share is not the overall.
-- `mathema-ci gate` fails a change that makes a claim falsified or
-  unknown, or lowers clarity, on a function it touches, and lets debt
-  that was already there, or is on untouched functions, through. It runs
+- `mathema-ci gate` fails a change that makes a claim falsified,
+  invalidated or unknown (each under its own name, as `mathema verify`
+  fails them in every mode), or lowers clarity, on a function it
+  touches, and lets debt that was already there, or is on untouched
+  functions, through. Accepted risk, skipped claims, mathema's own
+  suggestions and foreign-grammar claims do not block. It runs
   no tests: it reads the verified store after `mathema verify`. It finds
   the base as HEAD^1 of GitHub's pull request merge commit, as
   `CI_MERGE_REQUEST_DIFF_BASE_SHA` on GitLab (fetching it into a shallow
