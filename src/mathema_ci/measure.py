@@ -43,6 +43,7 @@ from typing import Any, Protocol, TypeVar
 
 from mathema.badges import BadgeScores
 
+from . import overall as _overall
 from .artifacts import DEFAULT_BADGE_DIR, write_badges
 from .core_tests import (
     Claim,
@@ -53,7 +54,6 @@ from .core_tests import (
     statement_notes,
     window_words,
 )
-from . import overall as _overall
 from .overall import predates_equal_wedges, with_overall
 from .readme import (
     badges_base,
