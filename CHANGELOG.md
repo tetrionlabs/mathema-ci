@@ -5,10 +5,11 @@ Notable changes to mathema-ci are recorded here from its first public release on
 ## 0.1.0
 
 - The first release. It requires mathema 0.6.4 or a later 0.6, the first
-  mathema whose own badges writer is off by default. `mathema-ci measure
-  --out` scores the whole project, as `mathema badges` does with no
-  target, and writes the same implementation, intent and clarity scores
-  and shields files.
+  mathema whose own badges writer is off by default. With no target
+  `mathema-ci measure --out` scores every function mathema's declared or
+  verified store knows, as `mathema badges` does with no target, and
+  writes the same implementation, intent and clarity scores and shields
+  files.
 - Overall is equal wedges: the mean of the three pairwise products of
   implementation, intent and clarity, `(a*b + b*c + c*a) / 3` on 0 to 1
   fractions, reported 0 to 100. This is not mathema 0.6.4's overall,
@@ -16,7 +17,8 @@ Notable changes to mathema-ci are recorded here from its first public release on
   snapshot, the ASCII triangle, the SVG card and the console differs
   from what mathema 0.6.4 reports for the same scores: 48 against 41 at
   88, 71 and 52. Equal wedges is computed in mathema-ci up to and
-  including 2026-11-19; after that date it is mathema's `triangle_area`
+  including 2026-11-19, the day in UTC, which `measure` reads once per
+  run; after that date it is mathema's `triangle_area`
   again when the installed mathema computes equal wedges too. When it does
   not, overall is unknown in every file and `measure` says in one line
   that the installed mathema predates the equal-wedges overall.
@@ -27,7 +29,8 @@ Notable changes to mathema-ci are recorded here from its first public release on
 - `--target MODULE`, which can be repeated, scores every function defined
   in MODULE, the population `mathema badges MODULE` scores, and the hint
   for a first claim names a function from the targets. With no target
-  `measure` scores the whole project.
+  `measure` scores every function mathema's declared or verified store
+  knows.
 - `mathema-ci measure` runs the project's tests under coverage with the
   test ledger on, as the `pytest` command runs them, streaming their output
   and exiting as they did; reads the claims the tests state and, with

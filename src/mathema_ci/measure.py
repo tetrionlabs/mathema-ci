@@ -190,7 +190,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--target", action="append", default=None, metavar="MODULE",
                    help="score every function defined in MODULE, as "
                         "`mathema badges MODULE` does; repeat for more than "
-                        "one (default: the whole project)")
+                        "one (default: every function mathema's declared or "
+                        "verified store knows)")
     return p
 
 

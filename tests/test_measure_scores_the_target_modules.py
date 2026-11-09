@@ -2,7 +2,8 @@
 # Copyright 2026 Tetrion Ltd
 """`--target MODULE` scores every function defined in MODULE, as
 `mathema badges MODULE` does, and can be given more than once; with no
-target `measure` scores the whole project as before. The targets reach
+target `measure` scores every function mathema's declared or verified
+store knows, as before. The targets reach
 mathema's `repo_badges` as its `targets`, and the first-claim hint names
 a function from them."""
 from __future__ import annotations
@@ -85,7 +86,7 @@ def test_the_targets_choose_the_functions_scored(two_modules):
     assert sorted(beta.per_function) == ["target_beta.h"]
     assert sorted(both.per_function) == ["target_alpha.f", "target_alpha.g",
                                          "target_beta.h"]
-    # with nothing declared, the whole project's store knows no function
+    # with nothing declared, the declared or verified store knows no function
     assert rootwide.per_function == {}
 
 

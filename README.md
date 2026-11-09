@@ -11,9 +11,16 @@ This package renders and runs. The measurement itself is mathema's.
 `pip install mathema-ci` installs it with mathema 0.6.4 or a later 0.6.
 From 0.6.4, mathema's own `mathema badges` writer is off by default;
 `mathema-ci measure --out` writes the badge files in its place. With no
-`--target` it scores the whole project, as `mathema badges` does with no
-target; `--target MODULE` scores every function defined in MODULE, as
-`mathema badges MODULE` does.
+`--target` it scores every function mathema's declared or verified store
+knows, as `mathema badges` does with no target; `--target MODULE` scores
+every function defined in MODULE, as `mathema badges MODULE` does.
+
+The overall is equal wedges, the mean of the three pairwise products of
+the scores, which is not mathema 0.6.4's overall for the same scores.
+Up to and including 2026-11-19, the day in UTC, mathema-ci computes it
+itself; after that it is mathema's `triangle_area` when the installed
+mathema computes equal wedges too, and otherwise overall is unknown and
+`measure` says the installed mathema predates it.
 
 ## measure
 
@@ -28,11 +35,11 @@ README block current, writes the badge files and exits as the tests did.
 Everything after `--` goes to pytest: `mathema-ci measure -- -n 2` runs
 the tests on two workers when pytest-xdist is installed.
 
-`--target MODULE` scores every function defined in MODULE instead of the
-whole project, and can be given more than once:
+`--target MODULE` scores every function defined in MODULE instead, and
+can be given more than once:
 `mathema-ci measure --out --target billing -- -n 2` scores the `billing`
 package and writes the badge files. Without it, `measure` scores every
-function mathema's store knows across the project.
+function mathema's declared or verified store knows.
 
 The tests run as the `pytest` command runs them, which is the target:
 each test reaches the outcome it reaches under `pytest`. A project whose
