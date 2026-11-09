@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+Notable changes to mathema-ci are recorded here from its first public release onward.
 
+## 0.1.0
+
+- The first release. It requires mathema 0.6.4 or a later 0.6, the first
+  mathema whose own badges writer is off by default. `mathema-ci measure
+  --out` scores the whole project, as `mathema badges` does with no
+  target, and writes the same scores, snapshot, shields files and ASCII
+  triangle.
 - `mathema-ci measure` runs the project's tests under coverage with the
   test ledger on, as the `pytest` command runs them, streaming their output
   and exiting as they did; reads the claims the tests state and, with

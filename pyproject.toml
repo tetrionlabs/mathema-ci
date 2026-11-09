@@ -24,7 +24,7 @@ keywords = ["mathema", "continuous-integration", "code-coverage",
             "pytest-plugin", "software-verification"]
 classifiers = [
     # PEP 639: no License:: classifier beside the `license` expression
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",

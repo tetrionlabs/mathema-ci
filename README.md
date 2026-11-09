@@ -8,8 +8,10 @@ badge files.
 
 This package renders and runs. The measurement itself is mathema's.
 
-Status: not released. The package name is reserved; the first release
-is 0.1.
+`pip install mathema-ci` installs it with mathema 0.6.4 or a later 0.6.
+From 0.6.4, mathema's own `mathema badges` writer is off by default;
+`mathema-ci measure --out` writes the badge files in its place, scoring
+the whole project as `mathema badges` does with no target.
 
 ## measure
 
