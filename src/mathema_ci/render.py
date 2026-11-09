@@ -183,31 +183,39 @@ def shields_payloads(scores: BadgeScores) -> dict:
 # longest base labels side by side.
 _SVG_CENTRE = (180.0, 180.0)
 _SVG_RADIUS = 124.0
+# Each spoke's angle in degrees, counter-clockwise from the +x axis.
+_SPOKE_DEGREES = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
+
+
+def _on_spoke(centre, radius, name, fraction):
+    """Intent:
+        The point `fraction` of the way out along `name`'s spoke from
+        `centre` to the circle of `radius`: (cx + R*f*cos t, cy - R*f*sin t)
+        for the spoke's angle t, the minus because y grows downward.
+    """
+    t = math.radians(_SPOKE_DEGREES[name])
+    cx, cy = centre
+    return (cx + radius * fraction * math.cos(t),
+            cy - radius * fraction * math.sin(t))
 
 
 def _svg_frame(centre, radius):
     """Intent:
-        The three frame corners on the circle of `radius` about `centre`:
-        CLARITY straight up, IMPL 120 degrees on to the lower left, INTENT
-        120 degrees on again to the lower right (y grows downward).
+        The three frame corners, each at the end of its spoke: CLARITY at
+        90 degrees (straight up), IMPL at 210 (lower left), INTENT at 330
+        (lower right).
     """
-    cx, cy = centre
-    half = radius * math.sqrt(3) / 2
-    return {"CLARITY": (cx, cy - radius),
-            "IMPL": (cx - half, cy + radius / 2),
-            "INTENT": (cx + half, cy + radius / 2)}
+    return {name: _on_spoke(centre, radius, name, 1.0) for name in _SPOKE_DEGREES}
 
 
-def _svg_score_point(origin, corner, score):
+def _svg_score_point(name, score):
     """Intent:
-        A score's point on its spoke from `origin` (all zero) out to its
-        frame `corner`, the score's fraction of the way along. The score
-        is clamped to 0 to 100; an unknown score (None) sits at the
-        origin.
+        A score's point on its spoke, the score's fraction of the way out
+        from the centre (all zero) to its corner. The score is clamped to
+        0 to 100; an unknown score (None) sits at the centre.
     """
     f = 0.0 if score is None else max(0.0, min(1.0, score / 100.0))
-    return (origin[0] + f * (corner[0] - origin[0]),
-            origin[1] + f * (corner[1] - origin[1]))
+    return _on_spoke(_SVG_CENTRE, _SVG_RADIUS, name, f)
 
 
 def render_svg(scores: BadgeScores, today: date | None = None) -> str:
@@ -240,8 +248,7 @@ def render_svg(scores: BadgeScores, today: date | None = None) -> str:
             ("IMPL", scores.implementation),
             ("INTENT", scores.intent))
     ghost = " ".join(f"{p[0]:.2f},{p[1]:.2f}" for p in (apex, left, right))
-    pts = {name: _svg_score_point(origin, frame[name], sc)
-           for name, sc in dims}
+    pts = {name: _svg_score_point(name, sc) for name, sc in dims}
     cur = " ".join(f"{pts[n][0]:.2f},{pts[n][1]:.2f}"
                    for n in ("CLARITY", "IMPL", "INTENT"))
     parts = [

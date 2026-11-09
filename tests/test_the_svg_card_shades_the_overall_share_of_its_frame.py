@@ -109,3 +109,20 @@ def test_the_spokes_meet_at_the_frame_centre_120_degrees_apart():
     assert [round(t, 1) for t in angles] == [90.0, 210.0, 330.0]
     # CLARITY at the top: the apex is the highest corner
     assert apex[1] < left[1] and apex[1] < right[1]
+
+
+def test_each_score_sits_on_its_spoke_by_the_shared_convention():
+    # angles counter-clockwise from +x; a point is (cx + R f cos t, cy - R f sin t)
+    cx, cy, radius = 180.0, 180.0, 124.0
+    angles = {"CLARITY": 90.0, "IMPL": 210.0, "INTENT": 330.0}
+    scores = {"CLARITY": 52, "IMPL": 88, "INTENT": 71}
+    _root, frame, shaded = _shapes(BadgeScores(88, 71, 52, None))
+    for (x, y), name in zip(shaded, ("CLARITY", "IMPL", "INTENT"), strict=True):
+        t = math.radians(angles[name])
+        f = scores[name] / 100
+        assert math.isclose(float(x), cx + radius * f * math.cos(t), abs_tol=0.005)
+        assert math.isclose(float(y), cy - radius * f * math.sin(t), abs_tol=0.005)
+    for (x, y), name in zip(frame, ("CLARITY", "IMPL", "INTENT"), strict=True):
+        t = math.radians(angles[name])
+        assert math.isclose(float(x), cx + radius * math.cos(t), abs_tol=0.005)
+        assert math.isclose(float(y), cy - radius * math.sin(t), abs_tol=0.005)
