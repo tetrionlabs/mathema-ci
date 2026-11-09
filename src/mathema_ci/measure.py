@@ -153,6 +153,7 @@ class Options:
     write_readme: bool = True
     readme: str = "README.md"
     junit: str | None = None
+    targets: list[str] = field(default_factory=list)
     pytest_args: list[str] = field(default_factory=list)
 
 
@@ -165,7 +166,8 @@ def _parser() -> argparse.ArgumentParser:
         usage="%(prog)s [options] [-- PYTEST_ARGS]",
         description="Run the project's tests under coverage with the test "
                     "ledger on, run mathema's verify (which writes "
-                    ".mathema/verified), score the project, print the "
+                    ".mathema/verified), score the project, or the "
+                    "--target modules, print the "
                     "triangle and keep the README block current. Exits as "
                     "the tests did; mathema verify is the gate for claims.")
     p.add_argument("--out", nargs="?", const=DEFAULT_BADGE_DIR, default=None,
@@ -182,6 +184,10 @@ def _parser() -> argparse.ArgumentParser:
                         "(default README.md)")
     p.add_argument("--junit", default=None, metavar="PATH",
                    help="also write pytest's junit report to PATH")
+    p.add_argument("--target", action="append", default=None, metavar="MODULE",
+                   help="score every function defined in MODULE, as "
+                        "`mathema badges MODULE` does; repeat for more than "
+                        "one (default: the whole project)")
     return p
 
 
@@ -197,7 +203,7 @@ def parse_args(argv: list[str]) -> Options:
     ns = _parser().parse_args(own)
     return Options(out=ns.out, stage=ns.stage, write_readme=ns.write_readme,
                    readme=ns.readme, junit=ns.junit,
-                   pytest_args=list(rest))
+                   targets=list(ns.target or []), pytest_args=list(rest))
 
 
 def suite_command(options: Options, environ: Mapping[str, str] | None = None) -> list[str]:
@@ -512,13 +518,14 @@ def verify_project(root: str) -> Verified:
     return sweep(root)
 
 
-def score_project(root: str) -> BadgeScores:
+def score_project(root: str, targets: Sequence[str] = ()) -> BadgeScores:
     """The project's scores, through mathema's `repo_badges`, with the
-    project importable."""
+    project importable: every function defined in `targets`, or with no
+    targets every function mathema's store knows across the project."""
     from mathema.badges import repo_badges
 
     _importable(root)
-    return repo_badges(None, root=root)
+    return repo_badges(list(targets) or None, root=root)
 
 
 def origin_remote(root: str) -> str | None:
@@ -576,19 +583,23 @@ def modules_in_report(files: Iterable[str]) -> list[str]:
     return modules
 
 
-def project_function_key(root: str) -> str | None:
+def project_function_key(root: str, targets: Sequence[str] = ()) -> str | None:
     """The dotted key of a public function of the project, the first one
-    mathema finds in the modules `coverage.json` measured, or None when
-    the report is missing or none is found."""
-    try:
-        with open(os.path.join(root, "coverage.json"), encoding="utf-8") as fh:
-            files = json.load(fh)["files"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+    mathema finds in `targets` or, with no targets, in the modules
+    `coverage.json` measured; None when there is no report to read or no
+    such function is found."""
+    modules = list(targets)
+    if not modules:
+        try:
+            with open(os.path.join(root, "coverage.json"), encoding="utf-8") as fh:
+                files = json.load(fh)["files"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        modules = modules_in_report(files)
     from mathema.audit import discover
 
     _importable(root)
-    for module in modules_in_report(files):
+    for module in modules:
         try:
             keys = discover([module])
         except (Exception, SystemExit):
@@ -1055,7 +1066,10 @@ def _claim_lines(options: Options, reading: Reading | None, staging: Staging | N
 def main(argv: list[str]) -> int:
     """`mathema-ci measure` on the project in the current directory, with
     the arguments that follow the command name."""
-    return run(parse_args(argv), root=os.getcwd(),
+    options = parse_args(argv)
+    return run(options, root=os.getcwd(),
                run_suite=run_suite_under_coverage, reader=core_reader(),
-               verify=verify_project, score=score_project,
-               remote=origin_remote, function_key=project_function_key)
+               verify=verify_project,
+               score=lambda root: score_project(root, options.targets),
+               remote=origin_remote,
+               function_key=lambda root: project_function_key(root, options.targets))

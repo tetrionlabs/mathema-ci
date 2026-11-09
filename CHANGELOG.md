@@ -9,6 +9,10 @@ Notable changes to mathema-ci are recorded here from its first public release on
   --out` scores the whole project, as `mathema badges` does with no
   target, and writes the same scores, snapshot, shields files and ASCII
   triangle.
+- `--target MODULE`, which can be repeated, scores every function defined
+  in MODULE, the population `mathema badges MODULE` scores, and the hint
+  for a first claim names a function from the targets. With no target
+  `measure` scores the whole project.
 - `mathema-ci measure` runs the project's tests under coverage with the
   test ledger on, as the `pytest` command runs them, streaming their output
   and exiting as they did; reads the claims the tests state and, with
