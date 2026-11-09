@@ -1,0 +1,267 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Tetrion Ltd
+"""The gate's grading: what a change did to the functions it touches.
+
+Each side, the base and the head, is its claims' verdicts and its
+functions' clarity. For every changed function the gate compares the two:
+
+- a claim falsified on the head that was not falsified on the base, or
+  not there, fails as newly falsified;
+- a claim unknown on the head that was not unknown on the base, or not
+  there, fails as a new unknown;
+- clarity lower on the head than on the base fails, for a function both
+  sides define and both scored, with the same clarity algorithm, and the
+  base's scoring not stopped at the wall-clock cap.
+
+A claim that was already falsified or unknown on the base is debt the
+change carried, and claims on functions the change did not touch are
+debt it left alone; neither blocks. An accepted risk is not an unknown.
+Everything here is pure: the sides come in as data.
+"""
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from mathema.records import classify_verdict, stance
+
+__all__ = ["ClaimRow", "FunctionRow", "Report", "Side", "exit_code", "grade",
+           "render_json", "render_text"]
+
+
+@dataclass(frozen=True)
+class Side:
+    """One side of the comparison: `claims` maps a function key to its
+    claims' verdicts by name, as recorded; `clarity` maps a key to its
+    clarity (None when the function posed no question; a key missing
+    when it was not scored); `capped` holds the keys whose clarity
+    stopped at the wall-clock cap; `algo` is the clarity algorithm."""
+
+    claims: Mapping[str, Mapping[str, str]]
+    clarity: Mapping[str, int | None]
+    capped: frozenset[str]
+    algo: str | None
+
+
+@dataclass(frozen=True)
+class ClaimRow:
+    """A claim the change made falsified or unknown: its verdict family on
+    the base (None when it was not there) and on the head."""
+
+    name: str
+    base: str | None
+    head: str
+    grade: str
+    fails: bool = True
+
+
+@dataclass(frozen=True)
+class FunctionRow:
+    """A changed function: `kind` is `edited` or `new`; its clarity on
+    each side, their difference (head minus base, None when not
+    compared), the plain-word grade, whether it fails, and the claims
+    the change made falsified or unknown."""
+
+    key: str
+    kind: str
+    base_clarity: int | None
+    head_clarity: int | None
+    difference: int | None
+    grade: str
+    fails: bool
+    claims: tuple[ClaimRow, ...]
+
+
+@dataclass(frozen=True)
+class Report:
+    """The gate's result: a row per changed function, sorted by key, and
+    the debt that does not block: falsified and unknown claims on
+    functions the change did not touch, and those on changed functions
+    that were so on the base too (`carried`)."""
+
+    functions: tuple[FunctionRow, ...]
+    untouched_falsified: int
+    untouched_unknown: int
+    carried: int
+
+    @property
+    def findings(self) -> int:
+        """The number of failing rows: functions and claims."""
+        return sum(row.fails + sum(c.fails for c in row.claims) for row in self.functions)
+
+
+def _family(verdict: str | None) -> str | None:
+    """Intent:
+        A verdict's family for the gate: `falsified` for every refuting
+        verdict, `unknown` for an unknown, otherwise the verdict's own
+        family (`holds`, `proven`, `skipped` and the like); None for no
+        verdict.
+    """
+    if verdict is None:
+        return None
+    if stance(verdict) == "refuted":
+        return "falsified"
+    return classify_verdict(verdict)
+
+
+def _bad(family: str | None) -> bool:
+    """Intent:
+        Whether a verdict family is one the gate fails on when new.
+    """
+    return family in ("falsified", "unknown")
+
+
+def _clarity(kind: str, key: str, base: Side, head: Side) -> tuple[int | None, int | None, str]:
+    """Intent:
+        A changed function's clarity on each side and the difference's
+        grade.
+    """
+    head_value = head.clarity.get(key)
+    base_value = base.clarity.get(key) if kind == "edited" else None
+    if head_value is None:
+        return base_value, None, "not scored"
+    if kind == "new":
+        return None, head_value, "new function"
+    if key not in base.clarity or base_value is None:
+        return None, head_value, "no base score"
+    if key in base.capped or key in head.capped:
+        return base_value, head_value, "capped, not compared"
+    if base.algo != head.algo:
+        return base_value, head_value, "algorithm changed, not compared"
+    if head_value < base_value:
+        return base_value, head_value, "lower"
+    return base_value, head_value, "same" if head_value == base_value else "higher"
+
+
+def grade(changed: Mapping[str, str], base: Side, head: Side) -> Report:
+    """The gate's report for the `changed` functions (`{key: "edited" |
+    "new"}`) between `base` and `head`."""
+    rows = []
+    carried = 0
+    for key in sorted(changed):
+        kind = changed[key]
+        base_value, head_value, word = _clarity(kind, key, base, head)
+        difference = (head_value - base_value
+                      if word in ("lower", "same", "higher")
+                      and head_value is not None and base_value is not None else None)
+        before = base.claims.get(key, {}) if kind == "edited" else {}
+        claims = []
+        for name, verdict in sorted((head.claims.get(key) or {}).items()):
+            now, then = _family(verdict), _family(before.get(name))
+            if not _bad(now):
+                continue
+            if now == then:
+                carried += 1
+                continue
+            claims.append(ClaimRow(name, then, now or "",
+                                   "newly falsified" if now == "falsified" else "new unknown"))
+        rows.append(FunctionRow(key, kind, base_value, head_value, difference, word,
+                                word == "lower", tuple(claims)))
+    untouched = [_family(v) for key, named in head.claims.items() if key not in changed
+                 for v in named.values()]
+    return Report(tuple(rows), untouched.count("falsified"), untouched.count("unknown"),
+                  carried)
+
+
+def exit_code(report: Report) -> int:
+    """1 when the report has a finding, 0 when it has none."""
+    return 1 if report.findings else 0
+
+
+def _measure(row: FunctionRow) -> str:
+    """Intent:
+        A function row's clarity, as the console states it.
+    """
+    def pct(v):
+        return "none" if v is None else f"{v}%"
+    if row.base_clarity is None or row.kind == "new":
+        return f"clarity {pct(row.head_clarity)}"
+    return f"clarity {pct(row.base_clarity)} -> {pct(row.head_clarity)}"
+
+
+def _said(word: str, fails: bool) -> str:
+    """Intent:
+        A grade as the console states it.
+    """
+    return f"{word}: fails" if fails else word
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    """Intent:
+        `n` with the word for one or for many.
+    """
+    return f"{n} {one if n == 1 else many}"
+
+
+def render_text(report: Report, base_label: str) -> str:
+    """The console text for `report` against the base named `base_label`:
+    each changed function with its clarity, the difference and the grade,
+    under it each claim the change made falsified or unknown, then the
+    debt that does not block and the result."""
+    lines = [f"Gate on changed code, against {base_label}"]
+    rows = report.functions
+    if not rows:
+        lines.append("  changed functions   none")
+    else:
+        new = sum(r.kind == "new" for r in rows)
+        lines.append(f"  changed functions   {len(rows)} ({new} new, {len(rows) - new} edited)")
+        table = []
+        for row in rows:
+            diff = "" if row.difference is None else (
+                f"+{row.difference}" if row.difference > 0 else str(row.difference))
+            table.append((f"  {row.key}", _measure(row), diff, _said(row.grade, row.fails)))
+            for c in row.claims:
+                said = c.head if c.base is None else f"{c.base} -> {c.head}"
+                table.append((f"    claim {c.name}", said, "", _said(c.grade, c.fails)))
+        name_w = max(len(t[0]) for t in table) + 4
+        measure_w = max(len(t[1]) for t in table)
+        diff_w = max([len(t[2]) for t in table] + [1])
+        lines.append("")
+        lines += [f"{n:<{name_w}}{m:<{measure_w}}   {d:>{diff_w}}   {g}"
+                  for n, m, d, g in table]
+    if report.untouched_falsified or report.untouched_unknown or report.carried:
+        lines += ["", "Existing debt, not blocking"]
+        if report.untouched_falsified or report.untouched_unknown:
+            lines.append(f"  {report.untouched_falsified} falsified and "
+                         f"{report.untouched_unknown} unknown claims on functions this "
+                         "change did not touch")
+        if report.carried:
+            lines.append(f"  {_plural(report.carried, 'claim', 'claims')} on changed "
+                         "functions falsified or unknown on the base too")
+    code = exit_code(report)
+    if report.findings:
+        result = (f"fails, {_plural(report.findings, 'finding', 'findings')} "
+                  "on changed code")
+    elif rows:
+        result = "passes, no findings on changed code"
+    else:
+        result = "passes, no changed function to gate"
+    lines += ["", f"Result: {result} (exit {code})"]
+    return "\n".join(lines)
+
+
+def render_json(report: Report, base_label: str) -> str:
+    """`report` as JSON for a pull or merge request comment: the same rows
+    and debt as the text, with the findings, the result and the exit
+    code."""
+    code = exit_code(report)
+    doc = {
+        "base": base_label,
+        "changed": {"total": len(report.functions),
+                    "new": sum(r.kind == "new" for r in report.functions),
+                    "edited": sum(r.kind == "edited" for r in report.functions)},
+        "functions": [{"key": r.key, "kind": r.kind, "base_clarity": r.base_clarity,
+                       "head_clarity": r.head_clarity, "difference": r.difference,
+                       "grade": r.grade, "fails": r.fails,
+                       "claims": [{"name": c.name, "base": c.base, "head": c.head,
+                                   "grade": c.grade, "fails": c.fails} for c in r.claims]}
+                      for r in report.functions],
+        "debt": {"untouched_falsified": report.untouched_falsified,
+                 "untouched_unknown": report.untouched_unknown,
+                 "carried": report.carried},
+        "findings": report.findings,
+        "result": "fails" if code else "passes",
+        "exit": code,
+    }
+    return json.dumps(doc, indent=2)
