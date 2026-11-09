@@ -30,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("measure", help="run the tests and measure the project")
     sub.add_parser("init", help="write the review template and CI workflow "
                                 "where they are missing")
+    sub.add_parser("gate", help="fail a change on new debt in the functions it "
+                                "touches")
     return parser
 
 
@@ -46,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["init"]:
         from . import init
         return init.main(argv[1:])
+    if argv[:1] == ["gate"]:
+        from . import gate_run
+        return gate_run.main(argv[1:])
     build_parser().parse_args(argv)
     build_parser().print_help()
     return 0

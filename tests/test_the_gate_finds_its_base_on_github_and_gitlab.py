@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Tetrion Ltd
+"""`mathema-ci gate` on real repositories, cloned shallow as CI clones
+them. It finds the base as each provider leaves it: HEAD^1 of GitHub's
+pull request merge commit, CI_MERGE_REQUEST_DIFF_BASE_SHA on GitLab
+(fetched when the clone lacks it), or the merge base with `--base REF`;
+with no base it exits 2 and names what is missing. It reads the base's
+committed store and badges snapshot, or with `--remeasure` works out the
+base's clarity in a temporary worktree it always removes. It runs no
+tests."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from mathema_ci import gate_run
+
+BIN = os.path.dirname(sys.executable)
+
+CALC = textwrap.dedent('''\
+    """Calc."""
+
+
+    def double(x: float) -> float:
+        """Return twice x."""
+        return x * 2
+
+
+    def half(x: float) -> float:
+        """Return half of x."""
+        return x / 2
+
+
+    def keep(x: float) -> float:
+        """Return x."""
+        return x
+    ''')
+
+CLAIMS = textwrap.dedent('''\
+    calc.double:
+      claims:
+        - name: doubles
+          statement: "for x in [0, 10], f(x) == 2 * x"
+    calc.half:
+      claims:
+        - name: halves
+          statement: "for x in [0, 10], f(x) == x / 2"
+    calc.keep:
+      claims:
+        - name: adds_one
+          statement: "for x in [0, 10], f(x) == x + 1"
+    ''')
+
+HEAD_CALC = CALC.replace("return x * 2", "return x * 3").replace(
+    "return x / 2", "return x * 0.5") + textwrap.dedent('''\
+
+
+    def triple(x: float) -> float:
+        """Return thrice x."""
+        return x * 3
+    ''')
+
+HEAD_CLAIMS = CLAIMS + textwrap.dedent('''\
+    calc.triple:
+      claims:
+        - name: triples
+          statement: "for x in [0, 10], f(x) == 3 * x"
+    ''')
+
+SNAPSHOT = """\
+import sys
+from mathema.badges import repo_badges
+from mathema_ci.artifacts import write_badges
+sys.path.insert(0, ".")
+write_badges(repo_badges(None, root=".", implementation=False), ".mathema/badges")
+"""
+
+
+def _env(**extra):
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("GITHUB_", "CI_", "GITLAB_", "PYTEST_", "COVERAGE_"))}
+    env["PATH"] = BIN + os.pathsep + env.get("PATH", "")
+    env.update(extra)
+    return env
+
+
+def _git(repo, *args, env=None):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                          capture_output=True, text=True, env=env).stdout.strip()
+
+
+def _verify_and_snapshot(repo):
+    subprocess.run([os.path.join(BIN, "mathema"), "verify", "--root", "."], cwd=repo,
+                   capture_output=True, text=True, env=_env())
+    subprocess.run([sys.executable, "-c", SNAPSHOT], cwd=repo, check=True,
+                   capture_output=True, text=True, env=_env())
+
+
+@pytest.fixture(scope="module")
+def origin(tmp_path_factory):
+    """An origin with `main` (the base, store and snapshot committed),
+    `feature` (the head: double and half edited, triple new, the store
+    verified again), `pr-merge` (GitHub's merge commit of feature into
+    main), and `nostore` and `nostore-head`, a base with no committed
+    store or snapshot and a change on it."""
+    repo = tmp_path_factory.mktemp("origin")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "config", "uploadpack.allowAnySHA1InWant", "true")
+    (repo / "pyproject.toml").write_text('[project]\nname = "calc"\n')
+    (repo / "calc.py").write_text(CALC)
+    (repo / "claims").mkdir()
+    (repo / "claims" / "calc.claims.yaml").write_text(CLAIMS)
+    _verify_and_snapshot(repo)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "feature")
+    (repo / "calc.py").write_text(HEAD_CALC)
+    (repo / "claims" / "calc.claims.yaml").write_text(HEAD_CLAIMS)
+    _verify_and_snapshot(repo)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+    _git(repo, "checkout", "-qb", "pr-merge", "main")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    _git(repo, "checkout", "-qb", "nostore", "main")
+    _git(repo, "rm", "-rq", ".mathema")
+    _git(repo, "commit", "-qm", "no store")
+    _git(repo, "checkout", "-qb", "nostore-head")
+    (repo / "calc.py").write_text(HEAD_CALC)
+    _git(repo, "checkout", "-q", "feature", "--", ".mathema", "claims")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head on no store")
+    _git(repo, "checkout", "-q", "main")
+    return repo
+
+
+def _clone(origin, tmp_path, branch, depth=None):
+    clone = tmp_path / "clone"
+    args = ["git", "clone", "-q", "--branch", branch]
+    if depth:
+        args += ["--depth", str(depth)]
+    subprocess.run([*args, f"file://{origin}", str(clone)], check=True, capture_output=True)
+    return clone
+
+
+def _gate(clone, *argv, **env):
+    return subprocess.run([os.path.join(BIN, "mathema-ci"), "gate", *argv], cwd=clone,
+                          capture_output=True, text=True, env=_env(**env))
+
+
+def test_on_a_github_merge_commit_the_base_is_head_s_first_parent(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    done = _gate(clone, GITHUB_EVENT_NAME="pull_request")
+    assert done.returncode == 1, done.stdout + done.stderr
+    main = _git(origin, "rev-parse", "--short=7", "main")
+    out = done.stdout
+    assert f"against the pull request base at {main} (HEAD^1)" in out
+    assert "changed functions   3 (1 new, 2 edited)" in out
+    assert "claim doubles" in out and "proven -> falsified" in out
+    assert "newly falsified: fails" in out
+    assert "calc.triple" in out and "new function" in out
+    assert "1 falsified and 0 unknown claims on functions this change did not touch" in out
+    assert "PASSED" not in out and "passed in" not in out
+
+
+def test_a_github_clone_one_commit_deep_names_the_depth_it_needs(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=1)
+    done = _gate(clone, GITHUB_EVENT_NAME="pull_request")
+    assert done.returncode == 2
+    assert "fetch-depth: 2" in done.stderr
+    assert done.stderr.count("\n") == 1
+
+
+def test_on_gitlab_the_merge_request_base_is_fetched_when_missing(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "feature", depth=1)
+    base = _git(origin, "rev-parse", "main")
+    missing = subprocess.run(["git", "-C", str(clone), "cat-file", "-e", f"{base}^{{commit}}"],
+                             capture_output=True)
+    assert missing.returncode != 0
+    done = _gate(clone, CI_MERGE_REQUEST_DIFF_BASE_SHA=base)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert f"against the merge request base at {base[:7]}" in done.stdout
+
+
+def test_with_base_the_merge_base_is_used(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "feature")
+    _git(clone, "branch", "-q", "main", "origin/main")
+    done = _gate(clone, "--base", "main")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "against main at " in done.stdout and "(merge base)" in done.stdout
+
+
+def test_with_no_base_it_exits_2_and_says_how_to_give_one(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "feature")
+    done = _gate(clone)
+    assert done.returncode == 2
+    assert "--base REF" in done.stderr and done.stderr.count("\n") == 1
+
+
+def test_json_carries_the_rows(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    done = _gate(clone, "--format", "json", GITHUB_EVENT_NAME="pull_request")
+    doc = json.loads(done.stdout)
+    assert doc["exit"] == done.returncode == 1
+    keys = {row["key"]: row for row in doc["functions"]}
+    assert set(keys) == {"calc.double", "calc.half", "calc.triple"}
+    assert keys["calc.triple"]["kind"] == "new"
+    assert keys["calc.double"]["claims"][0]["grade"] == "newly falsified"
+    assert keys["calc.half"]["base_clarity"] is not None
+
+
+def test_a_base_with_no_committed_store_suggests_remeasure(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "nostore-head")
+    _git(clone, "branch", "-q", "nostore", "origin/nostore")
+    done = _gate(clone, "--base", "nostore")
+    assert done.returncode == 2
+    assert "--remeasure" in done.stderr and done.stderr.count("\n") == 1
+
+
+def _worktrees(clone):
+    return _git(clone, "worktree", "list", "--porcelain").count("worktree ")
+
+
+def test_remeasure_works_out_the_base_and_removes_its_worktree(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "nostore-head")
+    _git(clone, "branch", "-q", "nostore", "origin/nostore")
+    done = _gate(clone, "--base", "nostore", "--remeasure", "--format", "json")
+    assert done.returncode == 1, done.stdout + done.stderr
+    doc = json.loads(done.stdout)
+    edited = [row for row in doc["functions"] if row["kind"] == "edited"]
+    assert edited and all(row["base_clarity"] is not None for row in edited)
+    assert _worktrees(clone) == 1
+
+
+def test_remeasure_removes_its_worktree_when_scoring_fails(origin, tmp_path, monkeypatch, capsys):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    calls = []
+
+    def failing(root, modules, keys):
+        calls.append(root)
+        if len(calls) == 2:
+            raise RuntimeError("scoring broke")
+        return gate_run.probe(root, modules, keys)
+
+    monkeypatch.setattr(gate_run, "_probe", failing)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.delenv("CI_MERGE_REQUEST_DIFF_BASE_SHA", raising=False)
+    code = gate_run.main(["--root", str(clone), "--remeasure"])
+    assert code == 2
+    assert "scoring broke" in capsys.readouterr().err
+    assert len(calls) == 2 and not Path(calls[1]).exists()
+    assert _worktrees(clone) == 1
+
+
+def test_base_snapshot_reads_the_snapshot_from_where_it_is_pointed(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    ok = _gate(clone, "--base-snapshot", "HEAD^1:.mathema/badges/snapshot.json",
+               GITHUB_EVENT_NAME="pull_request")
+    assert ok.returncode == 1, ok.stdout + ok.stderr
+    missing = _gate(clone, "--base-snapshot", "HEAD^1:nowhere/snapshot.json",
+                    GITHUB_EVENT_NAME="pull_request")
+    assert missing.returncode == 2
+    assert "HEAD^1:nowhere/snapshot.json" in missing.stderr
+
+
+def test_each_side_s_functions_come_from_that_side(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "feature")
+    worktree = tmp_path / "base"
+    _git(clone, "worktree", "add", "-q", "--detach", str(worktree), "origin/main")
+    try:
+        head = gate_run.probe(str(clone), ["calc"], ["calc.double"])
+        base = gate_run.probe(str(worktree), ["calc"], ["calc.double"])
+    finally:
+        _git(clone, "worktree", "remove", "--force", str(worktree))
+    assert Path(head.files["calc.double"]).resolve().parent == clone.resolve()
+    assert Path(base.files["calc.double"]).resolve().parent == worktree.resolve()
+    assert head.bodies["calc.double"] != base.bodies["calc.double"]
+    assert "x * 3" in head.bodies["calc.double"] and "x * 2" in base.bodies["calc.double"]
+
+
+def test_the_gate_runs_no_tests(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    (clone / "tests").mkdir()
+    (clone / "tests" / "test_boom.py").write_text(
+        "import pathlib\npathlib.Path('ran').write_text('yes')\n"
+        "def test_boom():\n    assert False\n")
+    _gate(clone, GITHUB_EVENT_NAME="pull_request")
+    assert not (clone / "ran").exists()
+    assert not (clone / "coverage.json").exists()
