@@ -7,8 +7,21 @@ Notable changes to mathema-ci are recorded here from its first public release on
 - The first release. It requires mathema 0.6.4 or a later 0.6, the first
   mathema whose own badges writer is off by default. `mathema-ci measure
   --out` scores the whole project, as `mathema badges` does with no
-  target, and writes the same scores, snapshot, shields files and ASCII
-  triangle.
+  target, and writes the same implementation, intent and clarity scores
+  and shields files.
+- Overall is equal wedges: the mean of the three pairwise products of
+  implementation, intent and clarity, `(a*b + b*c + c*a) / 3` on 0 to 1
+  fractions, reported 0 to 100. This is not mathema 0.6.4's overall,
+  `clarity * (implementation + intent) / 2`, so the overall in the
+  snapshot, the ASCII triangle, the SVG card and the console differs
+  from what mathema 0.6.4 reports for the same scores: 48 against 41 at
+  88, 71 and 52. Equal wedges is computed in mathema-ci up to and
+  including 2026-11-19; after that date it is mathema's `triangle_area`
+  again.
+- The SVG card draws the three spokes from the frame's centre, 120
+  degrees apart with clarity at the top, so the shaded share of the frame
+  is the overall. The ASCII triangle keeps its drawing, spokes from the
+  middle of the base, and its shaded share is not the overall.
 - `--target MODULE`, which can be repeated, scores every function defined
   in MODULE, the population `mathema badges MODULE` scores, and the hint
   for a first claim names a function from the targets. With no target
