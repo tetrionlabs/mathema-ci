@@ -52,7 +52,7 @@ from .core_tests import (
     statement_notes,
     window_words,
 )
-from .overall import with_overall
+from .overall import predates_equal_wedges, with_overall
 from .readme import (
     badges_base,
     has_block,
@@ -1029,8 +1029,11 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
             claims = [*trouble, f"  the claims read could not be shown ({unshown})"]
         if claims:
             sections.append(["Claims read from your tests", *claims])
-    sections.append(check_lines(verified, stopped,
-                                getattr(status, "notes", ()), scored=scores is not None))
+    notes = list(getattr(status, "notes", ()))
+    if scores is not None and predates_equal_wedges():
+        notes.append("the installed mathema predates the equal-wedges overall, so "
+                     "overall is unknown; upgrade mathema to a release that has it")
+    sections.append(check_lines(verified, stopped, notes, scored=scores is not None))
 
     closing: list[str] = []
     if options.out is not None:

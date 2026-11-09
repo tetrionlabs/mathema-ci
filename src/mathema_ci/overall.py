@@ -20,7 +20,10 @@ mathema 0.6.4's own `mathema.badges.triangle_area` is
 `clarity * (implementation + intent) / 2`. Up to and including
 `ADAPT_UNTIL` the overall is computed here by the formula above; after
 that date this module switches itself off and the overall is mathema's
-`triangle_area` again.
+`triangle_area` again, provided the installed mathema computes equal
+wedges too. An installed mathema that predates them leaves the overall
+unknown, so no card states an overall that differs from the share of
+the frame it shades.
 """
 from __future__ import annotations
 
@@ -30,7 +33,8 @@ from datetime import date
 import mathema.badges
 from mathema.badges import BadgeScores
 
-__all__ = ["ADAPT_UNTIL", "enabled", "overall", "triangle_area", "with_overall"]
+__all__ = ["ADAPT_UNTIL", "enabled", "overall", "predates_equal_wedges",
+           "triangle_area", "with_overall"]
 
 ADAPT_UNTIL = date(2026, 11, 19)
 
@@ -58,15 +62,37 @@ def triangle_area(a: float, b: float, c: float) -> int:
     return round(100 * (fa * fb + fb * fc + fc * fa) / 3.0)
 
 
+def _core_has_equal_wedges() -> bool:
+    """Intent:
+        Whether the installed mathema's `triangle_area` is equal wedges,
+        read from two values the two formulas tell apart: 88, 71 and 52
+        give 48 (41 by `clarity * (implementation + intent) / 2`), and
+        100, 100 and 0 give 33 (0 by the older formula).
+    """
+    area = mathema.badges.triangle_area
+    return area(88, 71, 52) == 48 and area(100, 100, 0) == 33
+
+
+def predates_equal_wedges(today: date | None = None) -> bool:
+    """Whether the overall is unknown because this module is switched off
+    (`enabled(today)` is false) and the installed mathema's
+    `triangle_area` is not equal wedges."""
+    return not enabled(today) and not _core_has_equal_wedges()
+
+
 def overall(implementation: int | None, intent: int | None, clarity: int | None,
             today: date | None = None) -> int | None:
     """The overall score for the three scores: this module's
     `triangle_area` while `enabled(today)`, mathema's after, and None when
-    any score is unknown (None)."""
+    any score is unknown (None) or, after the date, when the installed
+    mathema predates equal wedges."""
     if implementation is None or intent is None or clarity is None:
         return None
-    area = triangle_area if enabled(today) else mathema.badges.triangle_area
-    return area(implementation, intent, clarity)
+    if enabled(today):
+        return triangle_area(implementation, intent, clarity)
+    if not _core_has_equal_wedges():
+        return None
+    return mathema.badges.triangle_area(implementation, intent, clarity)
 
 
 def with_overall(scores: BadgeScores, today: date | None = None) -> BadgeScores:

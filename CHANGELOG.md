@@ -17,7 +17,9 @@ Notable changes to mathema-ci are recorded here from its first public release on
   from what mathema 0.6.4 reports for the same scores: 48 against 41 at
   88, 71 and 52. Equal wedges is computed in mathema-ci up to and
   including 2026-11-19; after that date it is mathema's `triangle_area`
-  again.
+  again when the installed mathema computes equal wedges too. When it does
+  not, overall is unknown in every file and `measure` says in one line
+  that the installed mathema predates the equal-wedges overall.
 - The SVG card draws the three spokes from the frame's centre, 120
   degrees apart with clarity at the top, so the shaded share of the frame
   is the overall. The ASCII triangle keeps its drawing, spokes from the

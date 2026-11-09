@@ -88,7 +88,8 @@ def render_triangle(a: int | None, b: int | None, c: int | None) -> str:
             return "unknown" if v is None else v
         return (f"IMPL {said(a)}   INTENT {said(b)}   CLARITY {said(c)}   "
                 f"overall unknown\n(no triangle: a dimension is unknown)")
-    overall = overall_score(a, b, c)
+    score = overall_score(a, b, c)
+    overall = "unknown" if score is None else str(score)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
     if min(a, b, c) < 5:
         return (f"IMPL {a}   INTENT {b}   CLARITY {c}   overall {overall}\n"
