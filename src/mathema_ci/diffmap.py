@@ -110,7 +110,7 @@ def module_of(path: str) -> str | None:
     return None
 
 
-def _span(node: ast.AST) -> tuple[int, int]:
+def _span(node: ast.stmt) -> tuple[int, int]:
     """Intent:
         A definition's lines, from its first decorator to its last line.
     """
