@@ -40,7 +40,7 @@ def _area(points):
 
 
 def _shapes(scores):
-    root = ET.fromstring(render_svg(scores))
+    root = ET.fromstring(render_svg(scores, ADAPT_UNTIL))
     polygons = list(root.iter(_NS + "polygon"))
     frame = next(p for p in polygons if p.get("stroke-dasharray"))
     shaded = next(p for p in polygons if not p.get("stroke-dasharray"))
@@ -50,6 +50,13 @@ def _shapes(scores):
 def _share(scores):
     _root, frame, shaded = _shapes(scores)
     return _area(shaded) / _area(frame)
+
+
+def _printed_overall(scores):
+    """The overall number the card prints, its large figure top right."""
+    root = ET.fromstring(render_svg(scores, ADAPT_UNTIL))
+    figure = next(el for el in root.iter(_NS + "text") if el.get("font-size") == "20")
+    return int("".join(figure.itertext()).rstrip("%"))
 
 
 def _mean_of_products(a, b, c):
@@ -70,10 +77,10 @@ def test_the_shaded_share_is_the_mean_of_the_pairwise_products(a, b, c):
 # 0, 3 and 50 sit exactly on a halfway point, 0.5, which coordinates
 # written to two decimal places cannot settle either way
 @pytest.mark.parametrize("a, b, c", [s for s in _CASES if s != (0, 3, 50)])
-def test_the_shaded_share_rounds_to_the_overall_the_card_states(a, b, c):
-    share = _share(BadgeScores(a, b, c, None))
-    stated = overall(a, b, c, today=ADAPT_UNTIL)
-    assert round(100 * float(share)) == stated
+def test_the_shaded_share_rounds_to_the_overall_the_card_prints(a, b, c):
+    scores = BadgeScores(a, b, c, None)
+    assert round(100 * float(_share(scores))) == _printed_overall(scores)
+    assert _printed_overall(scores) == overall(a, b, c, today=ADAPT_UNTIL)
 
 
 @pytest.mark.parametrize("a, b, c", _CASES)
@@ -90,9 +97,13 @@ def test_the_spokes_meet_at_the_frame_centre_120_degrees_apart():
     centre = ((apex[0] + left[0] + right[0]) / 3, (apex[1] + left[1] + right[1]) / 3)
     spokes = [el for el in root.iter(_NS + "line")]
     assert len(spokes) == 3
+    ends = []
     for el in spokes:
         assert math.isclose(float(el.get("x1")), centre[0], abs_tol=0.01)
         assert math.isclose(float(el.get("y1")), centre[1], abs_tol=0.01)
+        ends.append((float(el.get("x2")), float(el.get("y2"))))
+    # each spoke ends at its own corner of the frame
+    assert sorted(ends) == sorted((apex, left, right))
     angles = sorted(math.degrees(math.atan2(-(y - centre[1]), x - centre[0])) % 360
                     for x, y in (apex, left, right))
     assert [round(t, 1) for t in angles] == [90.0, 210.0, 330.0]

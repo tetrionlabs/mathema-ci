@@ -30,6 +30,7 @@ def _measure(tmp_path, argv=(), *, verify, status=0, scorer=None, reader=None):
                function_key=lambda root: "calc.add")
 
 
+@pytest.mark.usefixtures("equal_wedges_on")
 def test_a_clean_sweep_prints_nothing_about_itself(tmp_path, capsys):
     _measure(tmp_path, verify=FakeVerifier())
     out = capsys.readouterr().out
@@ -63,6 +64,7 @@ def test_problems_never_change_the_exit_status(tmp_path, status):
     assert _measure(tmp_path, verify=FakeVerifier(BROKEN), status=status) == status
 
 
+@pytest.mark.usefixtures("equal_wedges_on")
 def test_nothing_declared_says_so_with_a_next_command(tmp_path, capsys):
     empty = Verified(nothing_declared=True, fresh=0, adjudicated=0)
     reader = FakeReader(reading=Reading((), ()))

@@ -82,13 +82,23 @@ def test_with_overall_replaces_only_the_overall():
 
 
 @pytest.mark.usefixtures("equal_wedges_on")
-def test_every_artifact_states_the_one_overall_whatever_the_scores_carry():
-    # core 0.6.4's overall for these scores is 41; the artifacts state 48
+def test_every_artifact_states_the_one_overall_whatever_the_scores_carry(tmp_path, capsys):
+    from measure_fakes import FakeScorer, FakeSuite, FakeVerifier
+
+    from mathema_ci.measure import parse_args, run
+
+    # core 0.6.4's overall for these scores is 41; every artifact states 48
     scores = BadgeScores(88, 71, 52, 41, per_function={})
     assert ci_snapshot(scores)["overall"] == 48
     assert render_triangle(88, 71, 52).endswith("overall 48")
     svg = render_svg(scores)
     assert ">48%</text>" in svg and ">41%</text>" not in svg
+    run(parse_args(["--no-readme"]), root=str(tmp_path), run_suite=FakeSuite(0),
+        reader=None, verify=FakeVerifier(), score=FakeScorer(scores),
+        remote=lambda root: None, function_key=lambda root: None)
+    out = capsys.readouterr().out
+    assert "  overall          48%" in out and out.count("overall 48") == 1
+    assert "41" not in out
 
 
 def _old_core(a, b, c):
