@@ -20,9 +20,11 @@ import hashlib
 import json
 import os
 import re
+from datetime import date, timedelta
 
 from mathema.badges import BadgeScores
 
+from .overall import ADAPT_UNTIL
 from .overall import overall as overall_score
 from .render import render_svg, render_triangle, shields_payloads
 
@@ -30,19 +32,20 @@ __all__ = ["BADGE_FILES", "DEFAULT_BADGE_DIR", "RETIRED_BADGE_FILES",
            "BadgeFilesInTheWay", "ci_snapshot", "readme_snippet", "write_badges"]
 
 
-def ci_snapshot(scores: BadgeScores) -> dict:
+def ci_snapshot(scores: BadgeScores, today: date | None = None) -> dict:
     """A machine-readable snapshot for CI: the four repo numbers plus the
     per-function rows, so a job can compute and comment the area delta
     between two commits. `clarity_algo` records the clarity algorithm
     version, so a diff across a version bump reads as an algorithm change,
     not a regression. `capped`, present only when a step stopped at the
     badges step cap, lists `[key, steps]` for each such function, sorted
-    by key."""
+    by key. The overall is the one for the day `today` (today in UTC when
+    not given)."""
     out: dict = {"implementation": scores.implementation,
                  "intent": scores.intent,
                  "clarity": scores.clarity,
                  "overall": overall_score(scores.implementation, scores.intent,
-                                          scores.clarity),
+                                          scores.clarity, today),
                  "clarity_algo": scores.algo,
                  "per_function": scores.per_function}
     if scores.capped:
@@ -110,11 +113,18 @@ def _scores_stated(text: str) -> BadgeScores | None:
                        per_function={})
 
 
+# Two days, one on each side of ADAPT_UNTIL. The overall a badge file
+# states depends on the day only through which side of ADAPT_UNTIL it
+# falls, so rendering on both covers every day.
+_EVERY_SIDE = (ADAPT_UNTIL, ADAPT_UNTIL + timedelta(days=1))
+
+
 def _would_write(name: str, data: bytes) -> bool:
     """Intent:
         Whether `data`, with CRLF read as LF, is what measure writes under
-        `name` for some scores: the scores the file states are read back
-        and the file rendered again from them.
+        `name` for some scores on some day: the scores the file states are
+        read back and the file rendered again from them, on a day either
+        side of `ADAPT_UNTIL`, so the answer does not depend on today.
     """
     text = data.replace(b"\r\n", b"\n").decode("utf-8", "replace")
     try:
@@ -124,7 +134,7 @@ def _would_write(name: str, data: bytes) -> bool:
             scores = _scores_stated(text)
             if scores is None:
                 return False
-            return text == _planned_files(scores)[name].decode("utf-8")
+            return _rendered_on_some_day(scores, name, text)
         if name == "snapshot.json":
             found = json.loads(text)
             scores = BadgeScores(found["implementation"], found["intent"],
@@ -133,10 +143,10 @@ def _would_write(name: str, data: bytes) -> bool:
                                  algo=found["clarity_algo"],
                                  capped={key: tuple(steps)
                                          for key, steps in found.get("capped", [])})
-            return text == _planned_files(scores)[name].decode("utf-8")
+            return _rendered_on_some_day(scores, name, text)
         value = _score(json.loads(text)["message"].rstrip("%"))
         scores = BadgeScores(value, value or 0, value or 0, None, per_function={})
-        return text == _planned_files(scores)[name].decode("utf-8")
+        return _rendered_on_some_day(scores, name, text)
     except (ValueError, KeyError, TypeError, AttributeError):
         return False
 
@@ -214,23 +224,32 @@ def _write_atomically(path: str, data: bytes) -> None:
         raise
 
 
-def _planned_files(scores: BadgeScores) -> dict[str, bytes]:
+def _rendered_on_some_day(scores: BadgeScores, name: str, text: str) -> bool:
     """Intent:
-        Every badge file for `scores`, as file name to the UTF-8 bytes it
-        holds, whatever the locale's encoding is.
+        Whether `text` is the file `name` for `scores` on a day either side
+        of `ADAPT_UNTIL`.
+    """
+    return any(text == _planned_files(scores, day)[name].decode("utf-8")
+               for day in _EVERY_SIDE)
+
+
+def _planned_files(scores: BadgeScores, today: date | None = None) -> dict[str, bytes]:
+    """Intent:
+        Every badge file for `scores` on the day `today`, as file name to
+        the UTF-8 bytes it holds, whatever the locale's encoding is.
     """
     texts = {"triangle.txt": render_triangle(scores.implementation, scores.intent,
-                                             scores.clarity) + "\n"}
+                                             scores.clarity, today) + "\n"}
     for dim, payload in shields_payloads(scores).items():
         texts[f"{dim}.json"] = json.dumps(payload, indent=2) + "\n"
-    texts["triangle.svg"] = render_svg(scores) + "\n"
-    texts["snapshot.json"] = json.dumps(ci_snapshot(scores), indent=2) + "\n"
+    texts["triangle.svg"] = render_svg(scores, today) + "\n"
+    texts["snapshot.json"] = json.dumps(ci_snapshot(scores, today), indent=2) + "\n"
     texts["readme-snippet.md"] = readme_snippet()
     return {name: text.encode("utf-8") for name, text in texts.items()}
 
 
-def write_badges(scores: BadgeScores, out_dir: str, *,
-                 owned: bool = False) -> tuple[list, list, list]:
+def write_badges(scores: BadgeScores, out_dir: str, *, owned: bool = False,
+                 today: date | None = None) -> tuple[list, list, list]:
     """Write the badge artifacts under `out_dir`: `triangle.txt` (the
     ASCII triangle), one shields JSON per badge, `triangle.svg`,
     `snapshot.json`, `readme-snippet.md` (a paste-ready block for a
@@ -244,10 +263,12 @@ def write_badges(scores: BadgeScores, out_dir: str, *,
     is `owned`: measure's own badge directory, where its seven names are
     its own and such a file is adopted. Returns `(written, pruned,
     adopted)` paths, the manifest not among them, so neither a removal
-    nor an adoption is silent.
+    nor an adoption is silent. The files state the overall for the day
+    `today` (today in UTC when not given); whether a file is measure's
+    own does not depend on the day.
     """
     os.makedirs(out_dir, exist_ok=True)
-    planned = _planned_files(scores)
+    planned = _planned_files(scores, today)
     recorded = _read_manifest(out_dir)
     blocking = _in_the_way(planned, recorded, out_dir)
     if blocking and not owned:

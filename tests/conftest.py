@@ -10,5 +10,5 @@ pytest_plugins = ["pytester"]
 @pytest.fixture
 def equal_wedges_on(monkeypatch):
     """The overall computed as equal wedges whatever today's date is: the
-    day `mathema_ci.overall.enabled` reads is `ADAPT_UNTIL`."""
-    monkeypatch.setattr(overall, "_today", lambda: overall.ADAPT_UNTIL)
+    day `mathema_ci.overall.utc_today` gives is `ADAPT_UNTIL`."""
+    monkeypatch.setattr(overall, "utc_today", lambda: overall.ADAPT_UNTIL)

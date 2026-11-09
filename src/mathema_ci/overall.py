@@ -28,24 +28,27 @@ the frame it shades.
 from __future__ import annotations
 
 import dataclasses
-from datetime import date
+from datetime import date, datetime, timezone
 
 import mathema.badges
 from mathema.badges import BadgeScores
 
 __all__ = ["ADAPT_UNTIL", "enabled", "overall", "predates_equal_wedges",
-           "triangle_area", "with_overall"]
+           "triangle_area", "utc_today", "with_overall"]
 
 ADAPT_UNTIL = date(2026, 11, 19)
 
-# The day `enabled` reads when it is not given one.
-_today = date.today
+
+def utc_today() -> date:
+    """Today's date in UTC, the day every `today` below means when it is
+    not given, so machines in different time zones agree on it."""
+    return datetime.now(timezone.utc).date()
 
 
 def enabled(today: date | None = None) -> bool:
     """Whether the overall is still computed here: on every day up to and
     including `ADAPT_UNTIL`, off from the day after."""
-    return (today or _today()) <= ADAPT_UNTIL
+    return (today or utc_today()) <= ADAPT_UNTIL
 
 
 def triangle_area(a: float, b: float, c: float) -> int:

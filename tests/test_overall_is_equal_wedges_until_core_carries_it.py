@@ -111,7 +111,7 @@ def test_after_the_date_a_core_with_equal_wedges_gives_the_overall(monkeypatch):
 
 def test_an_old_core_after_the_date_writes_no_overall_anywhere(monkeypatch):
     monkeypatch.setattr(mathema.badges, "triangle_area", _old_core)
-    monkeypatch.setattr(overall, "_today", lambda: AFTER)
+    monkeypatch.setattr(overall, "utc_today", lambda: AFTER)
     scores = BadgeScores(88, 71, 52, 41, per_function={})
     assert ci_snapshot(scores)["overall"] is None
     assert render_triangle(88, 71, 52).endswith("overall unknown")
@@ -126,7 +126,7 @@ def test_measure_says_in_one_line_that_an_old_core_leaves_overall_unknown(
     from mathema_ci.measure import parse_args, run
 
     monkeypatch.setattr(mathema.badges, "triangle_area", _old_core)
-    monkeypatch.setattr(overall, "_today", lambda: AFTER)
+    monkeypatch.setattr(overall, "utc_today", lambda: AFTER)
     code = run(parse_args(["--no-readme"]), root=str(tmp_path),
                run_suite=FakeSuite(0), reader=None, verify=FakeVerifier(),
                score=FakeScorer(BadgeScores(88, 71, 52, 41, per_function={})),
@@ -146,8 +146,22 @@ def test_measure_says_nothing_of_it_while_the_copy_is_in_use(monkeypatch, tmp_pa
     from mathema_ci.measure import parse_args, run
 
     monkeypatch.setattr(mathema.badges, "triangle_area", _old_core)
-    monkeypatch.setattr(overall, "_today", lambda: ADAPT_UNTIL)
+    monkeypatch.setattr(overall, "utc_today", lambda: ADAPT_UNTIL)
     run(parse_args(["--no-readme"]), root=str(tmp_path), run_suite=FakeSuite(0),
         reader=None, verify=FakeVerifier(), score=FakeScorer(),
         remote=lambda root: None, function_key=lambda root: None)
+    assert "predates" not in capsys.readouterr().out
+
+
+def test_no_note_about_an_old_core_when_nothing_is_declared(monkeypatch, tmp_path, capsys):
+    from measure_fakes import FakeReader, FakeScorer, FakeSuite, FakeVerifier, Reading, Verified
+
+    from mathema_ci.measure import parse_args, run
+
+    monkeypatch.setattr(mathema.badges, "triangle_area", _old_core)
+    empty = Verified(nothing_declared=True, fresh=0, adjudicated=0)
+    run(parse_args(["--no-readme"]), root=str(tmp_path), run_suite=FakeSuite(0),
+        reader=FakeReader(reading=Reading((), ())), verify=FakeVerifier(empty),
+        score=FakeScorer(BadgeScores(None, 0, 0, None, per_function={})),
+        remote=lambda root: None, function_key=lambda root: "calc.add", today=AFTER)
     assert "predates" not in capsys.readouterr().out
