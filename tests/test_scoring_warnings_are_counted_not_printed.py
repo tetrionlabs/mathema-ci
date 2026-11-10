@@ -20,8 +20,9 @@ def _warning_scorer(root):
     for name in ("f", "g", "f"):
         warnings.warn(StateDependenceWarning(
             f"mathema: {name} inherits from global scope: X; behaviour depends on state "
-            "outside the function"))
-    warnings.warn("a library this project imports is deprecated", DeprecationWarning)
+            "outside the function"), stacklevel=2)
+    warnings.warn("a library this project imports is deprecated", DeprecationWarning,
+                  stacklevel=2)
     return SCORES
 
 
