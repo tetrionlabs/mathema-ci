@@ -15,8 +15,7 @@ verify, and compares each changed function with the base:
   (`mathema_ci.diffmap`);
 - each claim on either side is read from its record and classified by
   the rules verify's gate applies (`mathema_ci.gate.claim_states`); the
-  base's records are those committed at the base commit, read with git
-  show as mathema's own `review` reads them;
+  base's records are those committed at the base commit;
 - each function's clarity on the head is mathema's `clarity_score` over
   the head's store, each capped at mathema's badges step cap, and on the
   base it is the base commit's committed badges snapshot; when the base
@@ -203,20 +202,29 @@ def _states(store: Mapping[str, Mapping]) -> dict[str, dict]:
 
 def _records_at(root: str, sha: str) -> dict[str, Mapping]:
     """Intent:
-        `{key: entry}` for every verified record committed at `sha`, read
-        with git show as mathema's own `review` reads them.
+        `{key: entry}` for every verified record committed at `sha`, every
+        file read through one `git cat-file --batch`.
     """
     import yaml
 
     listing = _git(root, "ls-tree", "-r", "--name-only", sha, "--", STORE_PATH).stdout
-    out: dict[str, Mapping] = {}
-    for path in listing.splitlines():
-        if not path.endswith(".yaml"):
+    paths = [p for p in listing.splitlines() if p.endswith(".yaml")]
+    if not paths:
+        return {}
+    done = subprocess.run(["git", "cat-file", "--batch"], cwd=root, capture_output=True,
+                          input="".join(f"{sha}:{p}\n" for p in paths).encode())
+    data, at, out = done.stdout, 0, {}
+    for path in paths:
+        header_end = data.index(b"\n", at)
+        header = data[at:header_end].split()
+        at = header_end + 1
+        if len(header) < 3 or header[1] != b"blob":
             continue
-        done = _git(root, "show", f"{sha}:{path}")
+        size = int(header[2])
+        blob, at = data[at:at + size], at + size + 1
         try:
-            doc = yaml.safe_load(done.stdout) if done.returncode == 0 else None
-        except yaml.YAMLError:
+            doc = yaml.safe_load(blob.decode("utf-8"))
+        except (yaml.YAMLError, UnicodeDecodeError):
             raise GateError(f"the record {path} at {sha[:7]} is not readable YAML") from None
         if isinstance(doc, Mapping):
             out.update(doc)
