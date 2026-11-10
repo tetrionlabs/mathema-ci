@@ -211,14 +211,14 @@ def _clarity(kind: str, key: str, base: Side, head: Side) -> tuple[int | None, i
     """
     head_value = head.clarity.get(key)
     base_value = base.clarity.get(key) if kind == "edited" else None
+    if key in head.capped or (kind == "edited" and key in base.capped):
+        return base_value, head_value, "capped, not compared"
     if head_value is None:
         return base_value, None, "not scored"
     if kind == "new":
         return None, head_value, "new function"
     if key not in base.clarity or base_value is None:
         return None, head_value, "no base score"
-    if key in base.capped or key in head.capped:
-        return base_value, head_value, "capped, not compared"
     if base.algo != head.algo:
         return base_value, head_value, "algorithm changed, not compared"
     if head_value < base_value:

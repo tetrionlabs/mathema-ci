@@ -93,6 +93,14 @@ def test_a_capped_function_is_not_compared():
     assert row.grade == "capped, not compared" and not row.fails
 
 
+def test_a_function_capped_on_the_head_is_not_compared():
+    report = grade({"m.f": "edited", "m.g": "new"},
+                   _side(clarity={"m.f": 52}),
+                   _side(clarity={"m.f": None, "m.g": None}, capped={"m.f", "m.g"}))
+    assert [r.grade for r in report.functions] == ["capped, not compared"] * 2
+    assert exit_code(report) == 0
+
+
 def test_a_function_the_base_did_not_score_is_not_compared():
     report = grade({"m.f": "edited"}, _side(), _side(clarity={"m.f": 10}))
     assert report.functions[0].grade == "no base score"

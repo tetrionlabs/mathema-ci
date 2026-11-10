@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -114,10 +115,11 @@ def _verify_and_snapshot(repo):
 @pytest.fixture(scope="module")
 def origin(tmp_path_factory):
     """An origin with `main` (the base, store and snapshot committed),
-    `feature` (the head: double and half edited, triple new, the store
-    verified again), `pr-merge` (GitHub's merge commit of feature into
-    main), and `nostore` and `nostore-head`, a base with no committed
-    store or snapshot and a change on it."""
+    `feature` (the head: double and half edited, triple and quad new, the
+    store verified again), `pr-merge` (GitHub's merge commit of feature
+    into main), `nosnap` and `nosnap-head`, a base with its store but no
+    snapshot and a change on it, and `nostore` and `nostore-head`, a base
+    with neither."""
     repo = tmp_path_factory.mktemp("origin")
     _git(repo, "init", "-q", "-b", "main")
     _git(repo, "config", "user.email", "t@example.invalid")
@@ -138,6 +140,14 @@ def origin(tmp_path_factory):
     _git(repo, "commit", "-qm", "head")
     _git(repo, "checkout", "-qb", "pr-merge", "main")
     _git(repo, "merge", "-q", "--no-ff", "-m", "merge feature", "feature")
+    _git(repo, "checkout", "-qb", "nosnap", "main")
+    _git(repo, "rm", "-rq", ".mathema/badges")
+    _git(repo, "commit", "-qm", "no snapshot")
+    _git(repo, "checkout", "-qb", "nosnap-head")
+    (repo / "calc.py").write_text(HEAD_CALC)
+    _git(repo, "checkout", "-q", "feature", "--", ".mathema/verified", "claims")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head on no snapshot")
     _git(repo, "checkout", "-qb", "nostore", "main")
     _git(repo, "rm", "-rq", ".mathema")
     _git(repo, "commit", "-qm", "no store")
@@ -234,12 +244,46 @@ def test_json_carries_the_rows(origin, tmp_path):
     assert keys["calc.half"]["base_clarity"] is not None
 
 
-def test_a_base_with_no_committed_store_suggests_remeasure(origin, tmp_path):
-    clone = _clone(origin, tmp_path, "nostore-head")
-    _git(clone, "branch", "-q", "nostore", "origin/nostore")
-    done = _gate(clone, "--base", "nostore")
-    assert done.returncode == 2
-    assert "--remeasure" in done.stderr and done.stderr.count("\n") == 1
+TIMING = re.compile(r"^gate: [0-9.]+ s in all; head scored \d+ functions? in [0-9.]+ s; "
+                    r"base (re-measured \d+ functions?|read \d+ functions? from the "
+                    r"snapshot) in [0-9.]+ s$", re.M)
+
+
+@pytest.mark.parametrize("branch, missing", [
+    ("nostore", ".mathema/verified or committed .mathema/badges/snapshot.json"),
+    ("nosnap", ".mathema/badges/snapshot.json"),
+])
+def test_a_base_with_no_store_or_snapshot_is_re_measured_by_itself(origin, tmp_path,
+                                                                   branch, missing):
+    clone = _clone(origin, tmp_path, f"{branch}-head")
+    _git(clone, "branch", "-q", branch, f"origin/{branch}")
+    done = _gate(clone, "--base", branch, "--format", "json")
+    assert done.returncode == 1, done.stdout + done.stderr
+    said = [ln for ln in done.stderr.splitlines() if "re-measuring" in ln]
+    assert len(said) == 1 and missing in said[0]
+    edited = [row for row in json.loads(done.stdout)["functions"] if row["kind"] == "edited"]
+    assert edited and all(row["base_clarity"] is not None for row in edited)
+    assert re.search(TIMING, done.stderr) and "base re-measured 2 functions" in done.stderr
+    assert _worktrees(clone) == 1
+
+
+def test_remeasure_is_forced_even_with_a_snapshot(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    read = _gate(clone, GITHUB_EVENT_NAME="pull_request")
+    forced = _gate(clone, "--remeasure", GITHUB_EVENT_NAME="pull_request")
+    assert "base read 2 functions from the snapshot" in read.stderr
+    assert "base re-measured 2 functions" in forced.stderr
+    assert "re-measuring" not in read.stderr
+    assert forced.returncode == read.returncode == 1
+    assert _worktrees(clone) == 1
+
+
+def test_every_run_prints_one_timing_line(origin, tmp_path):
+    clone = _clone(origin, tmp_path, "pr-merge", depth=2)
+    done = _gate(clone, "--format", "json", GITHUB_EVENT_NAME="pull_request")
+    assert len(TIMING.findall(done.stderr)) == 1
+    assert "head scored 4 functions" in done.stderr
+    json.loads(done.stdout)
 
 
 def _worktrees(clone):
@@ -261,11 +305,11 @@ def test_remeasure_removes_its_worktree_when_scoring_fails(origin, tmp_path, mon
     clone = _clone(origin, tmp_path, "pr-merge", depth=2)
     calls = []
 
-    def failing(root, modules, keys):
+    def failing(root, modules, keys, timeout=None):
         calls.append(root)
         if len(calls) == 2:
             raise RuntimeError("scoring broke")
-        return gate_run.probe(root, modules, keys)
+        return gate_run.probe(root, modules, keys, timeout)
 
     monkeypatch.setattr(gate_run, "_probe", failing)
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
@@ -312,3 +356,53 @@ def test_the_gate_runs_no_tests(origin, tmp_path):
     _gate(clone, GITHUB_EVENT_NAME="pull_request")
     assert not (clone / "ran").exists()
     assert not (clone / "coverage.json").exists()
+
+
+def _slow_body(branches: int) -> str:
+    lines = ['"""Slow."""', "", "", "def big(x: float) -> float:",
+             '    """Return x after many steps."""', "    y = x"]
+    lines += [f"    if y > {i}:\n        y = y - {i % 7} + {i % 5}" for i in range(branches)]
+    return "\n".join(lines + ["    return y", ""])
+
+
+@pytest.fixture
+def slow_repo(tmp_path):
+    """A base whose `slow.big` is short and a head where it has 6000
+    branches, which takes `clarity_score` seconds; no store, no snapshot."""
+    repo = tmp_path / "slow"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    (repo / "pyproject.toml").write_text('[project]\nname = "slow"\n')
+    (repo / "slow.py").write_text(_slow_body(3))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "change")
+    (repo / "slow.py").write_text(_slow_body(6000))
+    _git(repo, "commit", "-qam", "head")
+    return repo
+
+
+def test_a_function_over_the_step_cap_is_capped_not_compared(slow_repo):
+    done = _gate(slow_repo, "--base", "main", "--format", "json",
+                 MATHEMA_BADGES_STEP_TIMEOUT="1")
+    assert done.returncode == 0, done.stdout + done.stderr
+    (row,) = json.loads(done.stdout)["functions"]
+    assert row["key"] == "slow.big" and row["grade"] == "capped, not compared"
+    assert row["head_clarity"] is None
+
+
+def test_a_remeasure_over_its_budget_exits_2_and_leaves_no_worktree(slow_repo):
+    _git(slow_repo, "checkout", "-qb", "slowbase", "main")
+    (slow_repo / "slow.py").write_text(_slow_body(6000))
+    _git(slow_repo, "commit", "-qam", "a slow base")
+    _git(slow_repo, "checkout", "-qb", "slowhead")
+    (slow_repo / "slow.py").write_text(_slow_body(6000).replace("y = x\n", "y = x + 0\n", 1))
+    _git(slow_repo, "commit", "-qam", "a change on it")
+    done = _gate(slow_repo, "--base", "slowbase", "--remeasure-budget", "1",
+                 MATHEMA_BADGES_STEP_TIMEOUT="60")
+    assert done.returncode == 2, done.stdout + done.stderr
+    said = [ln for ln in done.stderr.splitlines() if "budget" in ln]
+    assert len(said) == 1 and "--base-snapshot" in said[0] and "snapshot" in said[0]
+    assert _worktrees(slow_repo) == 1

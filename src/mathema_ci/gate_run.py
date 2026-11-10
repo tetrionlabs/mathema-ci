@@ -18,9 +18,15 @@ verify, and compares each changed function with the base:
   base's records are those committed at the base commit, read with git
   show as mathema's own `review` reads them;
 - each function's clarity on the head is mathema's `clarity_score` over
-  the head's store, and on the base it is the base commit's committed
-  badges snapshot, or with `--remeasure` `clarity_score` over a temporary
-  worktree of the base commit, which is always removed.
+  the head's store, each capped at mathema's badges step cap, and on the
+  base it is the base commit's committed badges snapshot; when the base
+  commit has no committed store or snapshot, or with `--remeasure`, it is
+  `clarity_score` over a temporary worktree of the base commit, capped the
+  same way, within a total budget (`--remeasure-budget`, 300 seconds by
+  default), and the worktree is always removed.
+
+Once the base is found, one line on stderr gives the time taken and how
+many functions each side scored.
 
 Each side's functions are imported in a process of its own
 (`mathema_ci.clarity_probe`), so the two never share a module. The
@@ -37,13 +43,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .diffmap import changed_functions, module_of, parse_diff
 from .gate import Side, claim_states, exit_code, grade, render_json, render_text
 
-__all__ = ["Base", "GateError", "Probe", "find_base", "main", "probe"]
+__all__ = ["Base", "GateError", "OverBudget", "Probe", "Timing", "find_base", "main",
+           "probe"]
 
 SNAPSHOT_PATH = ".mathema/badges/snapshot.json"
 STORE_PATH = ".mathema/verified"
@@ -65,12 +73,43 @@ class Base:
 @dataclass(frozen=True)
 class Probe:
     """One side's answer for the functions asked about: `clarity` by key
-    for each function found there, the file each was imported from and
-    its source."""
+    for each function found there (None for one capped), the keys whose
+    score stopped at the step cap, the file each was imported from and its
+    source."""
 
     clarity: Mapping[str, int | None]
+    capped: frozenset[str] = frozenset()
     files: Mapping[str, str] = field(default_factory=dict)
     bodies: Mapping[str, str] = field(default_factory=dict)
+
+
+class OverBudget(GateError):
+    """Re-measuring the base took longer than its budget."""
+
+
+@dataclass
+class Timing:
+    """How long each side took and how many functions it scored, and how
+    the base's clarity was found: `re-measured` or `read` from a
+    snapshot."""
+
+    head_seconds: float = 0.0
+    head_scored: int = 0
+    base_seconds: float = 0.0
+    base_scored: int = 0
+    base_how: str = "read"
+
+    def line(self, total: float) -> str:
+        """The one timing line."""
+        def n(count):
+            return f"{count} function{'' if count == 1 else 's'}"
+        base = (f"base re-measured {n(self.base_scored)}" if self.base_how == "re-measured"
+                else f"base read {n(self.base_scored)} from the snapshot")
+        return (f"gate: {total:.1f} s in all; head scored {n(self.head_scored)} in "
+                f"{self.head_seconds:.1f} s; {base} in {self.base_seconds:.1f} s")
+
+
+DEFAULT_BUDGET = 300.0
 
 
 def _git(root: str, *args: str) -> subprocess.CompletedProcess:
@@ -124,13 +163,20 @@ def find_base(root: str, ref: str | None, env: Mapping[str, str]) -> Base:
                     "pull_request or GitLab merge request pipeline")
 
 
-def probe(root: str, modules: list[str], keys: list[str]) -> Probe:
+def probe(root: str, modules: list[str], keys: list[str],
+          timeout: float | None = None) -> Probe:
     """`keys`' clarity in the tree at `root`, worked out in a process of
-    its own (`mathema_ci.clarity_probe`). Raises GateError when that
-    process fails or imports a function from outside `root`."""
+    its own (`mathema_ci.clarity_probe`), each function capped at
+    mathema's badges step cap. With `timeout`, the process is killed once
+    that many seconds pass, and OverBudget raised. Raises GateError when
+    the process fails or imports a function from outside `root`."""
     request = json.dumps({"root": root, "modules": sorted(set(modules)), "keys": keys})
-    done = subprocess.run([sys.executable, "-m", "mathema_ci.clarity_probe"], cwd=root,
-                          input=request, capture_output=True, text=True)
+    try:
+        done = subprocess.run([sys.executable, "-m", "mathema_ci.clarity_probe"], cwd=root,
+                              input=request, capture_output=True, text=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise OverBudget(f"scoring in {root} ran past {timeout:.0f} s") from None
     if done.returncode:
         last = (done.stderr.strip().splitlines() or ["no output"])[-1]
         raise GateError(f"working out clarity in {root} failed: {last}")
@@ -138,7 +184,8 @@ def probe(root: str, modules: list[str], keys: list[str]) -> Probe:
     if answer["outside"]:
         raise GateError(f"{', '.join(answer['outside'])} imported from outside {root}; "
                         "an installed copy is shadowing the tree")
-    return Probe(answer["clarity"], answer["files"], answer["bodies"])
+    return Probe(answer["clarity"], frozenset(answer["capped"]), answer["files"],
+                 answer["bodies"])
 
 
 # The probe the gate calls; a name of its own so a test can stand in for it.
@@ -191,11 +238,24 @@ def _snapshot(root: str, spec: str) -> dict:
         raise GateError(f"the badges snapshot at {spec} is not JSON") from None
 
 
-def _remeasured(root: str, sha: str, modules: list[str], keys: list[str]) -> Probe:
+def _over_budget(budget: float) -> OverBudget:
+    """Intent:
+        The error for a re-measure that ran past `budget` seconds, naming
+        the fast path.
+    """
+    return OverBudget(f"re-measuring the base ran past its budget of {budget:g} s; for the "
+                      "fast path commit the badges snapshot `mathema-ci measure --out` "
+                      "writes on the base branch, or point --base-snapshot at one")
+
+
+def _remeasured(root: str, sha: str, modules: list[str], keys: list[str],
+                budget: float) -> Probe:
     """Intent:
         `keys`' clarity on the base, worked out in a temporary worktree of
-        `sha` that is removed afterwards, whatever happens.
+        `sha` within `budget` seconds; the worktree is removed afterwards,
+        whatever happens.
     """
+    start = time.monotonic()
     holder = tempfile.mkdtemp(prefix="mathema-ci-gate-")
     tree = os.path.join(holder, "base")
     try:
@@ -203,7 +263,13 @@ def _remeasured(root: str, sha: str, modules: list[str], keys: list[str]) -> Pro
         if added.returncode:
             raise GateError(f"could not make a worktree of {sha[:7]}: "
                             f"{added.stderr.strip()}")
-        return _probe(tree, modules, keys)
+        left = budget - (time.monotonic() - start)
+        if left <= 0:
+            raise _over_budget(budget)
+        try:
+            return _probe(tree, modules, keys, timeout=left)
+        except OverBudget:
+            raise _over_budget(budget) from None
     finally:
         if os.path.isdir(tree):
             _git(root, "worktree", "remove", "--force", tree)
@@ -211,9 +277,16 @@ def _remeasured(root: str, sha: str, modules: list[str], keys: list[str]) -> Pro
 
 
 def run_gate(root: str, base: Base, *, snapshot: str | None = None,
-             remeasure: bool = False):
+             remeasure: bool = False, budget: float = DEFAULT_BUDGET,
+             timing: Timing | None = None, say=None):
     """The gate's report for the change from `base` to HEAD in the clone
-    at `root`. Raises GateError when it cannot be worked out."""
+    at `root`. The base is re-measured with `remeasure`, and also when its
+    commit has no committed store or snapshot (and no `snapshot` is
+    named), which `say` reports in one line. `timing` is filled in as
+    each side is scored. Raises GateError when the report cannot be
+    worked out."""
+    timing = Timing() if timing is None else timing
+    say = say or (lambda line: None)
     from mathema.badges import CLARITY_ALGO
     from mathema.spec import load_verified
 
@@ -233,28 +306,48 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
         return grade({}, empty, Side(head_states, {}, frozenset(), CLARITY_ALGO))
 
     base_records = _records_at(root, base.sha)
-    if not base_records and not remeasure:
-        raise GateError(f"the base commit {base.sha[:7]} has no committed {STORE_PATH}; pass "
-                        "--remeasure to work the base out (slower)")
+    snap = None
+    if not remeasure:
+        if snapshot:
+            snap = _snapshot(root, snapshot)
+        else:
+            try:
+                snap = _snapshot(root, f"{base.sha}:{SNAPSHOT_PATH}")
+            except GateError:
+                snap = None
+            missing = ([STORE_PATH] if not base_records else []) + (
+                [SNAPSHOT_PATH] if snap is None else [])
+            if missing:
+                remeasure = True
+                say(f"the base commit {base.sha[:7]} has no committed "
+                    f"{' or committed '.join(missing)}, so the gate is re-measuring it in a "
+                    "temporary worktree")
     head_modules = [m for c in changes if (m := module_of(c.path))]
+    started = time.monotonic()
     head = _probe(root, head_modules, list(changed))
+    timing.head_seconds, timing.head_scored = time.monotonic() - started, len(head.clarity)
     changed = {k: kind for k, kind in changed.items() if k in head.clarity}
     edited = [k for k, kind in changed.items() if kind == "edited"]
     base_states = _states(base_records)
     base_claims = {k: base_states[k] for k in edited if k in base_states}
 
-    if remeasure:
+    started = time.monotonic()
+    if remeasure or snap is None:
+        timing.base_how = "re-measured"
         base_modules = [m for c in changes if c.base_path and (m := module_of(c.base_path))]
-        measured = _remeasured(root, base.sha, base_modules, edited) if edited else Probe({})
-        base_side = Side(base_claims, dict(measured.clarity), frozenset(), CLARITY_ALGO)
+        measured = (_remeasured(root, base.sha, base_modules, edited, budget) if edited
+                    else Probe({}))
+        timing.base_scored = len(measured.clarity)
+        base_side = Side(base_claims, dict(measured.clarity), measured.capped, CLARITY_ALGO)
     else:
-        snap = _snapshot(root, snapshot or f"{base.sha}:{SNAPSHOT_PATH}")
         rows = snap.get("per_function") or {}
         clarity = {k: (rows[k] or {}).get("clarity") for k in edited if k in rows}
         capped = frozenset(key for key, steps in snap.get("capped") or []
                            if "clarity" in steps)
         base_side = Side(base_claims, clarity, capped, snap.get("clarity_algo"))
-    head_side = Side(head_states, dict(head.clarity), frozenset(), CLARITY_ALGO)
+        timing.base_scored = len(clarity)
+    timing.base_seconds = time.monotonic() - started
+    head_side = Side(head_states, dict(head.clarity), head.capped, CLARITY_ALGO)
     return grade(changed, base_side, head_side)
 
 
@@ -279,8 +372,13 @@ def _parser() -> argparse.ArgumentParser:
                           f"BASE:{SNAPSHOT_PATH})")
     how.add_argument("--remeasure", action="store_true",
                      help="work out the base's clarity for the changed functions in a "
-                          "temporary worktree of the base commit; slower, and needs no "
-                          "committed snapshot")
+                          "temporary worktree of the base commit even when a snapshot "
+                          "is committed; slower (done anyway when the base commit has no "
+                          "committed store or snapshot)")
+    p.add_argument("--remeasure-budget", metavar="SECONDS", type=float,
+                   default=DEFAULT_BUDGET,
+                   help="stop re-measuring the base after SECONDS and exit 2 "
+                        f"(default {DEFAULT_BUDGET:g})")
     p.add_argument("--format", choices=("text", "json"), default="text",
                    help="text (default) or json for a pull or merge request comment")
     p.add_argument("--root", default=".", help="the project root (default .)")
@@ -292,16 +390,24 @@ def main(argv: list[str]) -> int:
     returns 0, 1 or 2."""
     ns = _parser().parse_args(argv)
     root = os.path.abspath(ns.root)
+    timing, start, base = Timing(), time.monotonic(), None
+
+    def say(line: str) -> None:
+        print(f"mathema-ci gate: {line}", file=sys.stderr)
+
     try:
         base = find_base(root, ns.base, os.environ)
-        report = run_gate(root, base, snapshot=ns.base_snapshot, remeasure=ns.remeasure)
+        report = run_gate(root, base, snapshot=ns.base_snapshot, remeasure=ns.remeasure,
+                          budget=ns.remeasure_budget, timing=timing, say=say)
     except GateError as exc:
-        print(f"mathema-ci gate: {exc}", file=sys.stderr)
+        say(str(exc))
         return 2
     except Exception as exc:
-        print(f"mathema-ci gate: could not run ({type(exc).__name__}: {exc})",
-              file=sys.stderr)
+        say(f"could not run ({type(exc).__name__}: {exc})")
         return 2
+    finally:
+        if base is not None:
+            print(timing.line(time.monotonic() - start), file=sys.stderr)
     render = render_json if ns.format == "json" else render_text
     print(render(report, base.label))
     return exit_code(report)
