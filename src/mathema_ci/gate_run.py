@@ -213,7 +213,8 @@ def _records_at(root: str, sha: str) -> dict[str, Mapping]:
         return {}
     done = subprocess.run(["git", "cat-file", "--batch"], cwd=root, capture_output=True,
                           input="".join(f"{sha}:{p}\n" for p in paths).encode())
-    data, at, out = done.stdout, 0, {}
+    data, at = done.stdout, 0
+    out: dict[str, Mapping] = {}
     for path in paths:
         header_end = data.index(b"\n", at)
         header = data[at:header_end].split()
