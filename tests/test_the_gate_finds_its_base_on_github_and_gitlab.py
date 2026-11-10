@@ -303,18 +303,19 @@ def test_remeasure_works_out_the_base_and_removes_its_worktree(origin, tmp_path)
 
 def test_remeasure_removes_its_worktree_when_scoring_fails(origin, tmp_path, monkeypatch, capsys):
     clone = _clone(origin, tmp_path, "pr-merge", depth=2)
-    calls = []
+    calls, real = [], gate_run.probe
 
     def failing(root, modules, keys, timeout=None):
         calls.append(root)
         if len(calls) == 2:
             raise RuntimeError("scoring broke")
-        return gate_run.probe(root, modules, keys, timeout)
+        return real(root, modules, keys, timeout)
 
-    monkeypatch.setattr(gate_run, "_probe", failing)
+    monkeypatch.setattr(gate_run, "probe", failing)
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     monkeypatch.delenv("CI_MERGE_REQUEST_DIFF_BASE_SHA", raising=False)
-    code = gate_run.main(["--root", str(clone), "--remeasure"])
+    monkeypatch.chdir(clone)
+    code = gate_run.main(["--remeasure"])
     assert code == 2
     assert "scoring broke" in capsys.readouterr().err
     assert len(calls) == 2 and not Path(calls[1]).exists()
@@ -339,12 +340,13 @@ def test_each_side_s_functions_come_from_that_side(origin, tmp_path):
     try:
         head = gate_run.probe(str(clone), ["calc"], ["calc.double"])
         base = gate_run.probe(str(worktree), ["calc"], ["calc.double"])
+        assert Path(head.files["calc.double"]).resolve().parent == clone.resolve()
+        assert Path(base.files["calc.double"]).resolve().parent == worktree.resolve()
+        head_text = Path(head.files["calc.double"]).read_text()
+        base_text = Path(base.files["calc.double"]).read_text()
     finally:
         _git(clone, "worktree", "remove", "--force", str(worktree))
-    assert Path(head.files["calc.double"]).resolve().parent == clone.resolve()
-    assert Path(base.files["calc.double"]).resolve().parent == worktree.resolve()
-    assert head.bodies["calc.double"] != base.bodies["calc.double"]
-    assert "x * 3" in head.bodies["calc.double"] and "x * 2" in base.bodies["calc.double"]
+    assert "return x * 3" in head_text and "return x * 2" in base_text
 
 
 def test_the_gate_runs_no_tests(origin, tmp_path):

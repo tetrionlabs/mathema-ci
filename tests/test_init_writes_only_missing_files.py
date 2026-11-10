@@ -8,10 +8,12 @@ instead of editing `.gitlab-ci.yml`. It exits 0, or 2 for a bad option or
 a provider it cannot tell."""
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 
 import pytest
+import yaml
 
 from mathema_ci.cli import main
 
@@ -22,7 +24,13 @@ SECTIONS = ("## What changed", "## Claims added or changed", "## Verdicts",
 
 
 def _init(root, *argv):
-    return main(["init", "--root", str(root), *argv])
+    """`mathema-ci init` run in `root`, as a user runs it there."""
+    here = os.getcwd()
+    os.chdir(root)
+    try:
+        return main(["init", *argv])
+    finally:
+        os.chdir(here)
 
 
 def test_github_writes_the_template_and_the_workflow(tmp_path, capsys):
@@ -149,3 +157,20 @@ def test_the_workflows_offer_an_optional_gate_after_verify(tmp_path):
         text = (tmp_path / rel).read_text()
         assert text.index("mathema verify") < text.index("mathema-ci gate")
         assert "# - " in text.split("mathema-ci gate")[0].rsplit("\n", 1)[1]
+
+
+def test_the_github_workflow_runs_verify_and_says_strict_is_the_default(tmp_path):
+    _init(tmp_path, "--provider", "github")
+    text = (tmp_path / GITHUB[1]).read_text()
+    steps = yaml.safe_load(text)["jobs"]["verify"]["steps"]
+    assert any("mathema verify" in str(s.get("run", "")) for s in steps)
+    # the header does not promise a green first run: strict is the default
+    # and fails unverifiable claims too, which most stores have
+    assert "strict by default" in text and "--lenient" in text
+
+
+def test_the_gitlab_fragment_runs_verify_and_says_how_to_include_it(tmp_path):
+    _init(tmp_path, "--provider", "gitlab")
+    text = (tmp_path / GITLAB[1]).read_text()
+    assert "mathema verify" in " ".join(yaml.safe_load(text)["mathema-verify"]["script"])
+    assert "include:\n#     - local: .gitlab-ci.mathema.yml" in text

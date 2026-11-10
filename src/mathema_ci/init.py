@@ -86,15 +86,11 @@ def _parser() -> argparse.ArgumentParser:
     """
     p = argparse.ArgumentParser(
         prog="mathema-ci init",
-        description="Write the pull or merge request template and the CI "
-                    "workflow that runs mathema verify, only where a file is "
-                    "missing; a file already there is never overwritten.")
-    p.add_argument("--provider", choices=PROVIDERS, default=None,
-                   help="github, gitlab or both (default: read from the "
-                        "project's files, then its origin remote)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="say what would be written and write nothing")
-    p.add_argument("--root", default=".", help="the project root (default .)")
+        description="Write the pull or merge request template and the CI workflow "
+                    "that runs mathema verify, where they are missing.")
+    p.add_argument("--provider", choices=PROVIDERS,
+                   help="the provider (default: read from the project)")
+    p.add_argument("--dry-run", action="store_true", help="write nothing, say what would be")
     return p
 
 
@@ -102,7 +98,7 @@ def main(argv: list[str]) -> int:
     """`mathema-ci init` with the arguments that follow the command name.
     Returns 0, or 2 when the provider cannot be told."""
     ns = _parser().parse_args(argv)
-    root = ns.root
+    root = "."
     chosen = ns.provider or detect_provider(root)
     if chosen is None:
         print("mathema-ci init: could not tell whether this project is on GitHub "

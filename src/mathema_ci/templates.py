@@ -3,16 +3,13 @@
 """The CI pipeline fragments a project adopts to run mathema's verify gate.
 
 One fragment per provider: a GitHub Actions workflow, or a GitLab CI file
-the project includes from its own `.gitlab-ci.yml`. A fragment is written
-only where no file exists yet; once written it is the project's own file
-to edit, and a later call never touches it.
+the project includes from its own `.gitlab-ci.yml`, and the pull or merge
+request template beside it. `mathema-ci init` writes them where no file
+exists yet; once written each is the project's own file to edit.
 """
 from __future__ import annotations
 
-import os
-
-__all__ = ["CI_PROVIDERS", "CI_TEMPLATES", "REVIEW_TEMPLATE", "REVIEW_TEMPLATES",
-           "write_ci_templates"]
+__all__ = ["CI_TEMPLATES", "REVIEW_TEMPLATE", "REVIEW_TEMPLATES"]
 
 
 # provider: (path relative to the project root, file body)
@@ -84,8 +81,6 @@ mathema-verify:
 """),
 }
 
-CI_PROVIDERS = tuple(CI_TEMPLATES)
-
 # The pull or merge request description a reviewer reads beside the
 # change: the same sections for both providers.
 REVIEW_TEMPLATE = """\
@@ -117,23 +112,3 @@ REVIEW_TEMPLATES: dict[str, str] = {
     "github": ".github/pull_request_template.md",
     "gitlab": ".gitlab/merge_request_templates/Default.md",
 }
-
-
-def write_ci_templates(root: str, provider: str = "github") -> list[str]:
-    """Write `provider`'s CI fragment (`github` or `gitlab`) under the
-    project at `root`, only where no file is already there, and return the
-    paths written. A file already present is the project's own and is
-    left exactly as it is, so the result is empty when there was nothing
-    to write. Raises ValueError for a provider other than those in
-    `CI_PROVIDERS`."""
-    if provider not in CI_TEMPLATES:
-        raise ValueError(f"unknown CI provider {provider!r}; "
-                         f"expected one of {', '.join(CI_PROVIDERS)}")
-    rel, body = CI_TEMPLATES[provider]
-    path = os.path.join(root, rel)
-    if os.path.exists(path):
-        return []
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as fh:
-        fh.write(body)
-    return [path]

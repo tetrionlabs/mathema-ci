@@ -13,10 +13,10 @@ function's clarity is capped at mathema's badges step cap,
 `BADGES_STEP_TIMEOUT_SECONDS` (`MATHEMA_BADGES_STEP_TIMEOUT`), the cap
 `mathema badges` puts on the same step: the score runs in a thread of its
 own, and one that has not finished by then is left behind and listed as
-capped. It prints `{"clarity", "capped", "files", "bodies", "outside"}`:
-the clarity by key (None for a capped one), the capped keys, the file
-each function was imported from, its source, and the keys whose function
-came from a file outside the root.
+capped. It prints `{"clarity", "capped", "files", "outside"}`: the
+clarity by key (None for a capped one), the capped keys, the file each
+function was imported from, and the keys whose function came from a file
+outside the root.
 
 A process per side keeps the two sides' modules apart: the base's and
 the head's `calc` are both `calc`, and one process can import only one.
@@ -85,17 +85,16 @@ def main() -> int:
         except (Exception, SystemExit):
             continue
     store = load_verified(root)
-    out: dict = {"clarity": {}, "capped": [], "files": {}, "bodies": {}, "outside": []}
+    out: dict = {"clarity": {}, "capped": [], "files": {}, "outside": []}
     for key in request["keys"]:
         fn = found.get(key)
         if fn is None:
             continue
         try:
             path = inspect.getsourcefile(fn) or ""
-            body = inspect.getsource(fn)
-        except (OSError, TypeError):
-            path, body = "", ""
-        out["files"][key], out["bodies"][key] = path, body
+        except TypeError:
+            path = ""
+        out["files"][key] = path
         if path and not _within(path, root):
             out["outside"].append(key)
             continue

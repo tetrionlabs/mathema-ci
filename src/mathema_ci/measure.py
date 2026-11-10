@@ -54,6 +54,7 @@ from .core_tests import (
     statement_notes,
     window_words,
 )
+from .diffmap import module_of
 from .overall import predates_equal_wedges, with_overall
 from .readme import (
     badges_base,
@@ -175,23 +176,17 @@ def _parser() -> argparse.ArgumentParser:
                     "the tests did; mathema verify is the gate for claims.")
     p.add_argument("--out", nargs="?", const=DEFAULT_BADGE_DIR, default=None,
                    metavar="DIR",
-                   help="write the badge artifacts to DIR "
-                        f"(default {DEFAULT_BADGE_DIR})")
+                   help=f"write the badge files to DIR (default {DEFAULT_BADGE_DIR})")
     p.add_argument("--stage", action="store_true",
-                   help="decide the claims read from the tests and stage "
-                        "the ones that hold")
+                   help="stage the claims read from the tests that hold")
     p.add_argument("--no-readme", dest="write_readme", action="store_false",
                    help="leave the README block alone")
     p.add_argument("--readme", default="README.md", metavar="PATH",
-                   help="the file that holds the README block "
-                        "(default README.md)")
+                   help="keep the README block in PATH (default README.md)")
     p.add_argument("--junit", default=None, metavar="PATH",
                    help="also write pytest's junit report to PATH")
     p.add_argument("--target", action="append", default=None, metavar="MODULE",
-                   help="score every function defined in MODULE, as "
-                        "`mathema badges MODULE` does; repeat for more than "
-                        "one (default: every function mathema's declared or "
-                        "verified store knows)")
+                   help="score the functions defined in MODULE; repeatable")
     return p
 
 
@@ -567,24 +562,7 @@ def modules_in_report(files: Iterable[str]) -> list[str]:
     """The dotted modules of the files a coverage report measured, sorted
     by path: the project's own Python files, with a leading `src/` dropped,
     and neither test files nor files outside the project."""
-    modules = []
-    for name in sorted(files):
-        path = PurePosixPath(name.replace(os.sep, "/"))
-        parts = list(path.parts)
-        if path.is_absolute() or path.suffix != ".py" or ".." in parts:
-            continue
-        if parts[0] == "src":
-            parts = parts[1:]
-        parts[-1] = path.stem
-        if (any(p in ("test", "tests") for p in parts[:-1])
-                or path.stem == "conftest" or path.stem.startswith("test_")
-                or path.stem.endswith("_test")):
-            continue
-        if parts[-1] == "__init__":
-            parts = parts[:-1]
-        if parts and all(p.isidentifier() for p in parts):
-            modules.append(".".join(parts))
-    return modules
+    return [m for m in (module_of(name) for name in sorted(files)) if m]
 
 
 def project_function_key(root: str, targets: Sequence[str] = ()) -> str | None:
