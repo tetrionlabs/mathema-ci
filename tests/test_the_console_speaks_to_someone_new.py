@@ -197,7 +197,7 @@ def test_a_core_with_no_reader_gets_one_plain_line(tmp_path, capsys):
 
 
 NOTHING = Verified(nothing_declared=True, fresh=0, adjudicated=0)
-START = "No claims yet, so intent and clarity start at 0. To begin: "
+START = "No claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin: "
 
 
 def test_nothing_declared_begins_from_a_claim_the_tests_state(tmp_path, capsys):
@@ -218,7 +218,7 @@ def test_nothing_declared_with_no_reader_begins_from_a_function(tmp_path, capsys
 def test_nothing_declared_with_no_function_says_what_to_do_first(tmp_path, capsys):
     out = _console(tmp_path, capsys, verified=NOTHING,
                    reader=FakeReader(reading=Reading((), ())))
-    assert ("\nNo claims yet, so intent and clarity start at 0. To begin, mathema "
+    assert ("\nNo claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin, mathema "
             "needs a function of your project that it can import: install the "
             "project in this environment and check that your tests call it, then "
             "run measure again.\n") in out
@@ -234,7 +234,7 @@ def test_nothing_declared_shows_no_triangle_and_no_unknown(tmp_path, capsys):
   intent           0%    docstring statements a claim checks
   clarity          0%    how much of each function's behaviour is known
 
-No claims yet, so intent and clarity start at 0. To begin: mathema claims calc.add --suggest
+No claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin: mathema claims calc.add --suggest
 Implementation and overall are worked out once a function has a claim.
 """
 
@@ -253,7 +253,7 @@ def test_a_real_first_run_says_no_claims_plainly(tmp_path):
     done = measure(root, "--no-readme")
     assert done.returncode == 0, done.stdout + done.stderr
     out = done.stdout.split("passed in")[1].split("\n", 1)[1]
-    assert "No claims yet, so intent and clarity start at 0. To begin: mathema claims " in out
+    assert "No claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin: mathema claims " in out
     for word in ("unknown", "IMPL", "dimension", "\N{BLACK DIAMOND}", "your_module"):
         assert word not in out
 
@@ -315,3 +315,14 @@ def test_the_next_command_runs_on_the_installed_mathema(tmp_path):
          *shlex.split(found.group(1))],
         cwd=tmp_path, env=env, capture_output=True, text=True)
     assert begun.returncode == 0, begun.stdout + begun.stderr
+
+
+def test_no_claims_never_says_the_scores_are_zero_when_they_are_not(tmp_path, capsys):
+    out = _console(tmp_path, capsys, verified=NOTHING,
+                   reader=FakeReader(reading=Reading((), ())),
+                   scores=BadgeScores(86, 69, 16, None, per_function={}),
+                   function_key=lambda root: "calc.add")
+    assert "  intent           69%" in out and "  clarity          16%" in out
+    assert "start at 0" not in out
+    assert ("No claims yet: intent and clarity so far rest only on what mathema reads "
+            "from the code itself. To begin: mathema claims calc.add --suggest") in out

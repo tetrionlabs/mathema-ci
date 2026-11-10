@@ -88,7 +88,7 @@ What is known about your code
   intent           0%    docstring statements a claim checks
   clarity          0%    how much of each function's behaviour is known
 
-No claims yet, so intent and clarity start at 0. To begin: mathema claims billing.prices.with_tax --suggest
+No claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin: mathema claims billing.prices.with_tax --suggest
 Implementation and overall are worked out once a function has a claim.
 ```
 

@@ -662,7 +662,7 @@ def _verify_check(verified: Verified | None, stopped: str | None,
     return said
 
 
-_NO_CLAIMS = "No claims yet, so intent and clarity start at 0."
+_NO_CLAIMS = "No claims yet: intent and clarity so far rest only on what mathema reads from the code itself."
 
 
 def begin_line(reading: Reading | None, key: str | None) -> str:

@@ -70,7 +70,7 @@ def test_nothing_declared_says_so_with_a_next_command(tmp_path, capsys):
     reader = FakeReader(reading=Reading((), ()))
     assert _measure(tmp_path, verify=FakeVerifier(empty), reader=reader) == 0
     out = capsys.readouterr().out
-    assert ("\nNo claims yet, so intent and clarity start at 0. To begin: "
+    assert ("\nNo claims yet: intent and clarity so far rest only on what mathema reads from the code itself. To begin: "
             "mathema claims calc.add --suggest\n") in out
     assert HEADING not in out
 
@@ -171,7 +171,7 @@ def test_a_project_with_no_claims_gets_the_line_from_the_real_sweep(tmp_path, ca
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "path", list(sys.path))
     assert _measure(tmp_path, verify=verify_project) == 0
-    assert "No claims yet, so intent and clarity start at 0." in capsys.readouterr().out
+    assert "No claims yet: intent and clarity so far rest only on what mathema reads from the code itself." in capsys.readouterr().out
 
 
 def test_a_sweep_that_stops_with_no_scores_promises_no_numbers(tmp_path, capsys):
