@@ -35,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -982,7 +983,7 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         reading, staging, trouble = _read_and_stage(options, reader, root)
 
     verified, stopped = _attempt(lambda: verify(root))
-    scores, unscored = _attempt(lambda: score(root))
+    scores, unscored, warned = _scored_quietly(lambda: score(root))
     if scores is not None:
         scores = with_overall(scores, today)
 
@@ -1015,6 +1016,9 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         if claims:
             sections.append(["Claims read from your tests", *claims])
     notes = list(getattr(status, "notes", ()))
+    if warned:
+        notes.append(f"{_plural(warned, 'function reads', 'functions read')} module-level "
+                     "state; mathema warns about each, which measure leaves out here")
     worked_out = (scores is not None and not nothing_declared
                   and None not in (scores.implementation, scores.intent, scores.clarity))
     if worked_out and predates_equal_wedges(today):
@@ -1039,6 +1043,28 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
     sections.append(closing)
 
     _say("\n\n".join("\n".join(s) for s in sections if s))
+
+
+def _scored_quietly(step: Callable[[], BadgeScores]):
+    """Intent:
+        `(scores, problem, functions)`: `step` run as `_attempt` runs it,
+        with mathema's `StateDependenceWarning`s raised meanwhile, one per
+        function that reads module-level state, held back and `functions`
+        the number of distinct functions they name. Every other warning
+        raised meanwhile is raised again afterwards, from where it was first
+        raised, so the warning filters treat it as they would have.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("default")
+        scores, problem = _attempt(step)
+    named = set()
+    for w in caught:
+        kind = type(w.message)
+        if kind.__name__ == "StateDependenceWarning" and kind.__module__.startswith("mathema"):
+            named.add(str(w.message).split(" inherits ", 1)[0])
+        else:
+            warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+    return scores, problem, len(named)
 
 
 def _claim_lines(options: Options, reading: Reading | None, staging: Staging | None,
