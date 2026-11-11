@@ -39,6 +39,9 @@ from ._atomic import atomic_write
 
 PATH_VARIABLE = "MATHEMA_CI_SESSION"
 PACKAGES_VARIABLE = "MATHEMA_CI_PACKAGES"
+# Added to the session file's path: an empty file made when pytest takes an
+# interrupt, which tells measure not to pass the same interrupt on again.
+INTERRUPTED_SUFFIX = ".interrupted"
 LEDGER_OPTION = "--mathema-test-ledger"
 LEDGER_PLUGIN = "mathema"
 LEDGER_WRITER = "mathema-test-ledger"
@@ -151,6 +154,11 @@ def pytest_collectreport(report) -> None:
 def pytest_keyboard_interrupt(excinfo) -> None:
     if _state is not None:
         _state.stopped = True
+        try:
+            with open(_state.path + INTERRUPTED_SUFFIX, "x", encoding="utf-8"):
+                pass
+        except OSError:
+            pass
 
 
 def pytest_internalerror(excrepr, excinfo) -> None:

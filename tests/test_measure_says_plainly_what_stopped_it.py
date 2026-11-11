@@ -237,3 +237,20 @@ def test_a_module_missing_for_another_reason_gets_no_fix(tmp_path):
     assert done.returncode == 2
     assert "pythonpath" not in done.stderr
     assert "measure: pytest exited 2 before the tests completed; nothing measured" in done.stderr
+
+
+def test_a_pytest_slow_to_stop_after_an_interrupt_is_not_interrupted_again(tmp_path):
+    root = _slow_project(tmp_path, duration=30)
+    (root / "conftest.py").write_text(
+        "import time\n\n\n"
+        "def pytest_sessionfinish(session, exitstatus):\n"
+        "    time.sleep(5)\n")
+    proc = subprocess.Popen(
+        [os.path.join(BIN, "mathema-ci"), "measure", "--no-readme"],
+        cwd=root, env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True)
+    _wait_for_the_test(root, proc)
+    os.killpg(proc.pid, signal.SIGINT)
+    out, err = proc.communicate(timeout=60)
+    assert proc.returncode == 2, out + err
+    assert "nothing measured" in err and not (root / "finished").exists()

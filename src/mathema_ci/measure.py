@@ -92,6 +92,9 @@ _NO_TESTS = 5
 # names the file it writes.
 SESSION_PLUGIN = "mathema_pytest._session"
 SESSION_VARIABLE = "MATHEMA_CI_SESSION"
+# Added to the session file's path by the recorder when pytest takes an
+# interrupt.
+INTERRUPTED_SUFFIX = ".interrupted"
 # The variable that names the project's packages, whose copies the session
 # records.
 PACKAGES_VARIABLE = "MATHEMA_CI_PACKAGES"
@@ -314,13 +317,15 @@ def _signal_all(proc: subprocess.Popen, signum: int) -> None:
 
 def _run_passing_signals(command: list[str], *, cwd: str, env: dict[str, str],
                          grace: float = _INTERRUPT_GRACE,
-                         kill_grace: float = _TERMINATE_GRACE) -> int:
+                         kill_grace: float = _TERMINATE_GRACE,
+                         already_stopping: Callable[[], bool] = lambda: False) -> int:
     """Intent:
         Run `command` and return its exit status, with this process's
         signals passed on while it runs: a termination signal at once, and
         an interrupt after `grace` seconds, since a terminal's Ctrl-C
         reaches the whole process group and pytest is then already
-        stopping. A termination signal that arrives before the child
+        stopping; an interrupt is not passed on once `already_stopping`
+        says pytest has taken it, however long pytest then takes to stop. A termination signal that arrives before the child
         exists is passed on as soon as it does, and a child still running
         `kill_grace` seconds after a termination signal is killed, with
         everything below it. The handlers go in before the child starts,
@@ -369,8 +374,9 @@ def _run_passing_signals(command: list[str], *, cwd: str, env: dict[str, str],
                     _signal_all(proc, signal.SIGKILL)
                 if interrupted_at and now - interrupted_at[0] >= grace:
                     interrupted_at.clear()
-                    with contextlib.suppress(OSError):
-                        proc.send_signal(signal.SIGINT)
+                    if not already_stopping():
+                        with contextlib.suppress(OSError):
+                            proc.send_signal(signal.SIGINT)
     finally:
         for number, earlier in previous.items():
             signal.signal(number, earlier)
@@ -628,7 +634,9 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
         session_path = os.path.join(held, "session.json")
         env[SESSION_VARIABLE] = session_path
         env[PACKAGES_VARIABLE] = ",".join(project_packages(root))
-        status = _run_passing_signals(command, cwd=root, env=env)
+        status = _run_passing_signals(
+            command, cwd=root, env=env,
+            already_stopping=lambda: os.path.exists(session_path + INTERRUPTED_SUFFIX))
         session = _read_session(session_path)
         result = assess_session(status, session, root)
     finally:
