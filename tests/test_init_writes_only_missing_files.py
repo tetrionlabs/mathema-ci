@@ -79,6 +79,20 @@ def test_a_file_already_there_is_kept_byte_for_byte(tmp_path, capsys):
     assert "written  .github/workflows/mathema-verify.yml" in out
 
 
+def test_a_file_made_after_the_check_is_kept_not_overwritten(tmp_path, capsys, monkeypatch):
+    import mathema_ci.init as init
+
+    rel = GITHUB[0]
+    (tmp_path / rel).parent.mkdir(parents=True)
+    (tmp_path / rel).write_text("mine\n")
+    real = init.os.path.lexists
+    monkeypatch.setattr(init.os.path, "lexists",
+                        lambda p: False if p.endswith(rel) else real(p))
+    assert _init(tmp_path, "--provider", "github") == 0
+    assert (tmp_path / rel).read_text() == "mine\n"
+    assert f"kept, already there  {rel}" in capsys.readouterr().out
+
+
 def test_a_second_run_writes_nothing(tmp_path, capsys):
     _init(tmp_path, "--provider", "both")
     capsys.readouterr()

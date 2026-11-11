@@ -115,8 +115,12 @@ def main(argv: list[str]) -> int:
             lines.append(f"would write  {rel}")
             continue
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(body)
+        try:
+            with open(path, "x", encoding="utf-8", newline="\n") as fh:
+                fh.write(body)
+        except FileExistsError:
+            lines.append(f"kept, already there  {rel}")
+            continue
         lines.append(f"written  {rel}")
     if "gitlab" in providers:
         lines += _include_lines(root)
