@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import tempfile
@@ -43,6 +43,8 @@ from pathlib import PurePosixPath
 from typing import Any, Protocol, TypeVar
 
 from mathema.badges import BadgeScores
+
+from mathema_pytest._atomic import atomic_write
 
 from . import overall as _overall
 from .artifacts import DEFAULT_BADGE_DIR, write_badges
@@ -67,7 +69,9 @@ from .readme import (
 from .render import render_triangle
 
 __all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "SuiteStatus",
-           "assess_session", "main", "modules_in_report", "parse_args", "project_function_key", "run",
+           "UnreadableModules", "assess_session", "copies_outside", "imported_line",
+           "in_process_copies", "main", "modules_in_report", "parse_args",
+           "project_function_key", "project_packages", "run",
            "suite_command"]
 
 T = TypeVar("T")
@@ -87,11 +91,18 @@ _NO_TESTS = 5
 # names the file it writes.
 SESSION_PLUGIN = "mathema_pytest._session"
 SESSION_VARIABLE = "MATHEMA_CI_SESSION"
+# The variable that names the project's packages, whose copies the session
+# records.
+PACKAGES_VARIABLE = "MATHEMA_CI_PACKAGES"
 
 # How long pytest has to stop by itself after an interrupt before measure
 # passes the interrupt on, and how often measure looks, both in seconds.
 _INTERRUPT_GRACE = 2.0
 _POLL_SECONDS = 0.1
+
+# How long the test run has to stop after measure passes it a termination
+# signal before measure kills it, in seconds.
+_TERMINATE_GRACE = 10.0
 
 # After a signal, how long the run's coverage data must stay away before
 # measure stops erasing it, and the longest it waits, in seconds.
@@ -129,16 +140,20 @@ class SuiteStatus(int):
     """pytest's exit status, with what the session recorded beside it:
     `measured` is False when the run gives nothing to measure, `why` says
     so in words, and `notes` are what to check before relying on the
-    scores of a run that did measure."""
+    scores of a run that did measure, and `imported` where the tests
+    imported each of the project's packages from."""
 
     measured: bool
     why: str | None
     notes: tuple[str, ...]
+    imported: Mapping[str, str | None]
 
     def __new__(cls, status: int, *, measured: bool = True, why: str | None = None,
-                notes: tuple[str, ...] = ()) -> SuiteStatus:
+                notes: tuple[str, ...] = (),
+                imported: Mapping[str, str | None] | None = None) -> SuiteStatus:
         made = super().__new__(cls, status)
         made.measured, made.why, made.notes = measured, why, notes
+        made.imported = dict(imported or {})
         return made
 
 
@@ -287,28 +302,46 @@ def _descendants(pid: int) -> list[int]:
     return found
 
 
+def _signal_all(proc: subprocess.Popen, signum: int) -> None:
+    """Intent:
+        Send `signum` to `proc` and every process below it, deepest first.
+    """
+    for pid in [*_descendants(proc.pid), proc.pid]:
+        with contextlib.suppress(OSError):
+            os.kill(pid, signum)
+
+
 def _run_passing_signals(command: list[str], *, cwd: str, env: dict[str, str],
-                         grace: float = _INTERRUPT_GRACE) -> int:
+                         grace: float = _INTERRUPT_GRACE,
+                         kill_grace: float = _TERMINATE_GRACE) -> int:
     """Intent:
         Run `command` and return its exit status, with this process's
         signals passed on while it runs: a termination signal at once, and
         an interrupt after `grace` seconds, since a terminal's Ctrl-C
         reaches the whole process group and pytest is then already
-        stopping. The handlers go in before the child starts, so a child of
-        a measure that was started with a signal ignored still takes that
-        signal as a fresh process does. An interrupt is never raised here.
+        stopping. A termination signal that arrives before the child
+        exists is passed on as soon as it does, and a child still running
+        `kill_grace` seconds after a termination signal is killed, with
+        everything below it. The handlers go in before the child starts,
+        so a child of a measure that was started with a signal ignored
+        still takes that signal as a fresh process does. An interrupt is
+        never raised here.
     """
     interrupted_at: list[float] = []
+    terminated_at: list[float] = []
+    pending: list[int] = []
     started: list[subprocess.Popen] = []
 
     def on_interrupt(signum, frame) -> None:
         interrupted_at.append(time.monotonic())
 
     def on_terminate(signum, frame) -> None:
+        if not terminated_at:
+            terminated_at.append(time.monotonic())
+        if not started:
+            pending.append(signum)
         for proc in started:
-            for pid in [*_descendants(proc.pid), proc.pid]:
-                with contextlib.suppress(OSError):
-                    os.kill(pid, signum)
+            _signal_all(proc, signum)
 
     previous: dict[int, Any] = {}
     handlers: dict[int, Any] = {signal.SIGINT: on_interrupt, signal.SIGTERM: on_terminate}
@@ -322,11 +355,18 @@ def _run_passing_signals(command: list[str], *, cwd: str, env: dict[str, str],
     try:
         proc = subprocess.Popen(command, cwd=cwd, env=env)
         started.append(proc)
+        if pending:
+            _signal_all(proc, pending[0])
         while True:
             try:
                 return proc.wait(timeout=_POLL_SECONDS)
             except subprocess.TimeoutExpired:
-                if interrupted_at and time.monotonic() - interrupted_at[0] >= grace:
+                now = time.monotonic()
+                if terminated_at and now - terminated_at[0] >= kill_grace \
+                        and hasattr(signal, "SIGKILL"):
+                    terminated_at.clear()
+                    _signal_all(proc, signal.SIGKILL)
+                if interrupted_at and now - interrupted_at[0] >= grace:
                     interrupted_at.clear()
                     with contextlib.suppress(OSError):
                         proc.send_signal(signal.SIGINT)
@@ -363,12 +403,112 @@ def _unimportable_at_root(session: dict | None, root: str) -> str | None:
     return None
 
 
+# Directories and modules at a project's root (or under `src`) that are
+# not its code.
+_NOT_PACKAGES = frozenset({"tests", "test", "docs", "doc", "examples", "scripts", "devtools",
+                           "build", "dist", "conftest", "setup", "noxfile", "tasks"})
+_INSTALLED_DIRS = frozenset({"site-packages", "dist-packages"})
+
+
+def project_packages(root: str) -> list[str]:
+    """The top-level packages and modules of the project at `root`, sorted:
+    each directory with an `__init__.py` and each `.py` file at the root
+    or under `src`, leaving out tests, docs, build output, tooling files
+    and names that cannot be imported."""
+    found: set[str] = set()
+    for base in (root, os.path.join(root, "src")):
+        try:
+            names = os.listdir(base)
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(base, name)
+            stem = name[:-3] if name.endswith(".py") else name
+            if not stem.isidentifier() or stem in _NOT_PACKAGES \
+                    or stem.startswith("test_") or stem.endswith("_test"):
+                continue
+            if name.endswith(".py") and os.path.isfile(path):
+                found.add(stem)
+            elif os.path.isfile(os.path.join(path, "__init__.py")):
+                found.add(name)
+    return sorted(found)
+
+
+def _is_project_copy(path: str, root: str) -> bool:
+    """Intent:
+        Whether the file at `path` is the project's own code: under `root`
+        and not inside an installed packages directory there.
+    """
+    top = os.path.realpath(root)
+    here = os.path.realpath(path)
+    try:
+        inside = os.path.commonpath([top, here]) == top
+    except ValueError:
+        return False
+    rel = os.path.relpath(here, top).split(os.sep)
+    return inside and not _INSTALLED_DIRS.intersection(rel)
+
+
+def copies_outside(copies: Mapping[str, str | None], root: str) -> list[tuple[str, str]]:
+    """The `(name, file)` pairs of `copies` (`{name: file it was imported
+    from}`, None for one not imported) that are not the project's own
+    code at `root`, sorted by name."""
+    return sorted((name, path) for name, path in copies.items()
+                  if path and not _is_project_copy(path, root))
+
+
+def imported_line(copies: Mapping[str, str | None], root: str) -> str | None:
+    """The line saying which copy of each of the project's packages was
+    imported, each relative to `root`; None when none was imported."""
+    shown = [(name, os.path.relpath(os.path.realpath(path), os.path.realpath(root)))
+             for name, path in sorted(copies.items()) if path]
+    if not shown:
+        return None
+    if len(shown) == 1:
+        return f"measure: imported {shown[0][0]} from this project ({shown[0][1]})"
+    return ("measure: imported " + ", ".join(f"{n} ({p})" for n, p in shown)
+            + " from this project")
+
+
+def _another_copy(outside: list[tuple[str, str]], root: str, where: str) -> str:
+    """Intent:
+        Why a run that would read another copy of the project's code
+        measures nothing, and how to make it read the project's.
+    """
+    named = ", ".join(f"{name} from {path}" for name, path in outside)
+    return (f"{where} imported {named}, not the code of this project at "
+            f"{os.path.realpath(root)}, so its numbers would not be this project's; install "
+            "the project into the environment that runs measure (pip install -e . or uv "
+            "sync), or install mathema-ci into the project's own environment with --no-deps")
+
+
+def in_process_copies(root: str, names: Sequence[str]) -> dict[str, str | None]:
+    """Where this process imports each of `names` from, with the project
+    at `root` on the import path as verify puts it: the module already
+    loaded, else where the import would find it; None for neither."""
+    _importable(root)
+    out: dict[str, str | None] = {}
+    for name in names:
+        module = sys.modules.get(name)
+        path = getattr(module, "__file__", None) if module is not None else None
+        if path is None and module is None:
+            try:
+                spec = importlib.util.find_spec(name)
+            except (ImportError, ValueError):
+                spec = None
+            path = spec.origin if spec is not None and spec.has_location else None
+        out[name] = path
+    return out
+
+
 def assess_session(status: int, session: dict | None, root: str = ".") -> SuiteStatus:
     """What a finished pytest process gave: whether it gives anything to
     measure, from its exit status and what its session recorded. A status
     of pytest's own for an incomplete run, a signal, a session that left
     no record or stopped before its end, and a session in which no test
-    ran, all measure nothing. A collection error that could not import a
+    ran, all measure nothing, and so does a session whose tests imported
+    one of the project's packages from a copy that is not the project's
+    own (`copies_outside`). A collection error that could not import a
     module of the project at `root` says how to put the root on the
     import path, as the `pytest` command needs."""
     if incomplete(status):
@@ -388,7 +528,12 @@ def assess_session(status: int, session: dict | None, root: str = ".") -> SuiteS
     if not session.get("complete"):
         return SuiteStatus(status, measured=False,
                            why=f"pytest stopped before the tests completed (exit status {status})")
-    return SuiteStatus(status)
+    imported = session.get("imported") or {}
+    outside = copies_outside(imported, root)
+    if outside:
+        return SuiteStatus(status, measured=False,
+                           why=_another_copy(outside, root, "the tests"))
+    return SuiteStatus(status, imported=imported)
 
 
 def _erase_late_coverage(root: str, *, settle: bool) -> None:
@@ -480,6 +625,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
     try:
         session_path = os.path.join(held, "session.json")
         env[SESSION_VARIABLE] = session_path
+        env[PACKAGES_VARIABLE] = ",".join(project_packages(root))
         status = _run_passing_signals(command, cwd=root, env=env)
         session = _read_session(session_path)
         result = assess_session(status, session, root)
@@ -494,7 +640,7 @@ def run_suite_under_coverage(options: Options, root: str) -> int:
                      "it and its lines are not in the report")
     else:
         notes += _export_report(root, session)
-    return SuiteStatus(result, notes=tuple(notes))
+    return SuiteStatus(result, notes=tuple(notes), imported=result.imported)
 
 
 def _importable(root: str) -> None:
@@ -570,7 +716,8 @@ def project_function_key(root: str, targets: Sequence[str] = ()) -> str | None:
     """The dotted key of a public function of the project, the first one
     mathema finds in `targets` or, with no targets, in the modules
     `coverage.json` measured; None when there is no report to read or no
-    such function is found."""
+    such function is found. Raises `UnreadableModules` when none is found
+    and mathema could not read a module that exists."""
     modules = list(targets)
     if not modules:
         try:
@@ -582,15 +729,36 @@ def project_function_key(root: str, targets: Sequence[str] = ()) -> str | None:
     from mathema.audit import discover
 
     _importable(root)
+    unread: list[str] = []
     for module in modules:
         try:
             keys = discover([module])
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as exc:
+            if _findable(module):
+                unread.append(f"{module} ({_in_plain_words(exc)})")
             continue
         for key in sorted(keys):
             if not any(part.startswith("_") for part in key.split(".")):
                 return key
+    if unread:
+        raise UnreadableModules(", ".join(unread))
     return None
+
+
+class UnreadableModules(LookupError):
+    """No public function was found, and mathema could not read some of
+    the modules it looked in: each named with what it raised."""
+
+
+def _findable(module: str) -> bool:
+    """Intent:
+        Whether `module` exists to be imported, so a failure to read it is
+        a failure in it and not a name a stale report still carries.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def _in_plain_words(exc: BaseException) -> str:
@@ -666,20 +834,22 @@ def _verify_check(verified: Verified | None, stopped: str | None,
 _NO_CLAIMS = "No claims yet: intent and clarity so far rest only on what mathema reads from the code itself."
 
 
-def begin_line(reading: Reading | None, key: str | None) -> str:
+def begin_line(reading: Reading | None, key: str | None, stopped: str | None = None) -> str:
     """The line for a project with no claims, with a command that works on
     this mathema: read the claims of a function the tests already state
     claims about, else ask for suggestions about `key`, a function of the
     project. With neither, what to do first: mathema needs a function it
     can import, which an uninstalled project or tests that call nothing of
-    the project do not give it."""
+    the project do not give it; `stopped` says why looking for one
+    stopped, when it did."""
     if reading is not None and reading.claims:
         command = f"mathema claims {reading.claims[0].key} --from-tests"
     elif key is not None:
         command = f"mathema claims {key} --suggest"
     else:
+        why = f"; looking for one stopped ({stopped})" if stopped else ""
         return (f"{_NO_CLAIMS} To begin, mathema needs a function of your project "
-                "that it can import: install the project in this environment and "
+                f"that it can import{why}: install the project in this environment and "
                 "check that your tests call it, then run measure again.")
     return f"{_NO_CLAIMS} To begin: {command}"
 
@@ -754,25 +924,14 @@ def staging_lines(staging: Staging, *, root: str, counted: bool,
 def _replace_text(path: str, text: str) -> None:
     """Intent:
         Write `text` to the file `path` (or, for a link, the file it points
-        to) in one step: through a temporary file beside it, with the file's
-        mode, so a reader sees the old text or the new. A file that cannot
-        be written is left as it was and raises `PermissionError`.
+        to) in one step, with the file's mode, so a reader sees the old
+        text or the new. A file that cannot be written is left as it was
+        and raises `PermissionError`.
     """
     target = os.path.realpath(path)
     if not os.access(target, os.W_OK):
         raise PermissionError(f"{path} is not writable")
-    mode = os.stat(target).st_mode
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(target),
-                               prefix="." + os.path.basename(target) + ".")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
-            fh.write(text)
-        os.chmod(tmp, stat.S_IMODE(mode))
-        os.replace(tmp, target)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.remove(tmp)
-        raise
+    atomic_write(target, text)
 
 
 def badge_folder(options: Options, root: str) -> str:
@@ -941,14 +1100,17 @@ def run(options: Options, *, root: str,
         score: Callable[[str], BadgeScores],
         remote: Callable[[str], str | None],
         function_key: Callable[[str], str | None],
-        today: date | None = None) -> int:
+        today: date | None = None,
+        imported: Mapping[str, str | None] | None = None) -> int:
     """`measure` with its effects passed in: `run_suite` runs the tests
     and returns pytest's exit status, `reader` reads and stages claims
     from them (None when mathema has none), `verify` records the
     project's claims and returns what it found, `score` scores the
     project, `remote` names its git remote and `function_key` names one
     of its functions. `today` is the day the run's overall is worked out
-    for, read once, today in UTC when not given. Returns the tests' exit status, whatever was found
+    for, read once, today in UTC when not given; `imported` is where this
+    process imports the project's packages from, said beside where the
+    tests imported them. Returns the tests' exit status, whatever was found
     or failed after them, an interrupt included: 128 plus the signal when a
     signal killed pytest."""
     today = today or _overall.utc_today()
@@ -956,6 +1118,9 @@ def run(options: Options, *, root: str,
     if incomplete(status) or status == _NO_TESTS or not getattr(status, "measured", True):
         _say(f"measure: {_nothing_measured(status)}; nothing measured", sys.stderr)
         return 128 - status if status < 0 else int(status)
+    said = imported_line({**(imported or {}), **getattr(status, "imported", {})}, root)
+    if said is not None:
+        _say(said, sys.stderr)
     try:
         _report(options, root=root, status=status, reader=reader, verify=verify,
                 score=score, remote=remote, function_key=function_key, today=today)
@@ -998,8 +1163,8 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         sections.append(["What is known about your code",
                          f"  could not be worked out ({unscored})"])
     if nothing_declared:
-        key, _ = _attempt(lambda: function_key(root))
-        begin = [begin_line(reading, key)]
+        key, stopped = _attempt(lambda: function_key(root))
+        begin = [begin_line(reading, key, stopped)]
         if scores is not None and scores.implementation is None:
             begin.append("Implementation and overall are worked out once a "
                          "function has a claim.")
@@ -1086,7 +1251,14 @@ def main(argv: list[str]) -> int:
     """`mathema-ci measure` on the project in the current directory, with
     the arguments that follow the command name."""
     options = parse_args(argv)
-    return run(options, root=os.getcwd(),
+    root = os.getcwd()
+    here = in_process_copies(root, project_packages(root))
+    outside = copies_outside(here, root)
+    if outside:
+        _say(f"measure: {_another_copy(outside, root, 'mathema-ci itself')}; nothing "
+             "measured", sys.stderr)
+        return 2
+    return run(options, root=root, imported=here,
                run_suite=run_suite_under_coverage, reader=core_reader(),
                verify=verify_project,
                score=lambda root: score_project(root, options.targets),

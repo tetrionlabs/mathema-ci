@@ -29,6 +29,7 @@ from measure_fakes import (
 )
 
 from mathema_ci.measure import (
+    begin_line,
     modules_in_report,
     parse_args,
     project_function_key,
@@ -290,6 +291,28 @@ def test_no_key_when_the_report_names_no_function(tmp_path, monkeypatch, report)
     if report is not None:
         (tmp_path / "coverage.json").write_text(report)
     assert project_function_key(str(tmp_path)) is None
+
+
+def test_a_module_mathema_cannot_read_is_said_not_skipped(tmp_path, monkeypatch):
+    from mathema_ci.measure import UnreadableModules
+
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(sys, "modules", dict(sys.modules))
+    (tmp_path / "console_broken.py").write_text(
+        "import console_missing_dependency\n\n\ndef shown(x):\n    return x\n")
+    (tmp_path / "coverage.json").write_text(
+        '{"files": {"console_broken.py": {}, "gone_module.py": {}}}')
+    with pytest.raises(UnreadableModules) as caught:
+        project_function_key(str(tmp_path))
+    said = str(caught.value)
+    assert "console_broken" in said and "console_missing_dependency" in said
+    assert "gone_module" not in said
+
+
+def test_the_first_claim_line_says_why_looking_for_a_function_stopped():
+    line = begin_line(None, None, "UnreadableModules: calc (ImportError: boom)")
+    assert "looking for one stopped (UnreadableModules: calc (ImportError: boom))" in line
+    assert begin_line(None, "calc.add", "ignored").endswith("mathema claims calc.add --suggest")
 
 
 def test_the_next_command_runs_on_the_installed_mathema(tmp_path):

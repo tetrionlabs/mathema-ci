@@ -14,7 +14,9 @@ controlling process, and nothing at all otherwise:
   only when tests ran and the run completed, so an incomplete run leaves the
   last report as it was;
 - it writes one JSON file when pytest finishes: how many tests reported,
-  whether the run completed, and what became of the test ledger.
+  whether the run completed, what became of the test ledger, and the file
+  each of the project's packages (named in `MATHEMA_CI_PACKAGES`) was
+  imported from.
 
 A process with no such file named (an xdist worker, whose environment comes
 after the variable is removed) has no state and every hook returns at once.
@@ -26,12 +28,14 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 from typing import Any
 
 import pytest
 
+from ._atomic import atomic_write
+
 PATH_VARIABLE = "MATHEMA_CI_SESSION"
+PACKAGES_VARIABLE = "MATHEMA_CI_PACKAGES"
 LEDGER_OPTION = "--mathema-test-ledger"
 LEDGER_PLUGIN = "mathema"
 LEDGER_WRITER = "mathema-test-ledger"
@@ -59,6 +63,7 @@ class _Session:
         self.junit_held: str | None = None
         self.no_test_runs = False
         self.missing: list[str] = []
+        self.packages: list[str] = []
 
     def complete(self) -> bool:
         return (not self.stopped and bool(self.nodeids) and not self.no_test_runs
@@ -75,9 +80,11 @@ def _begin() -> None:
     """
     global _state
     path = os.environ.pop(PATH_VARIABLE, None)
+    packages = os.environ.pop(PACKAGES_VARIABLE, "")
     if not path:
         return
     _state = _Session(path)
+    _state.packages = [name for name in packages.split(",") if name]
     if sys.path and os.path.abspath(sys.path[0] or ".") == os.getcwd():
         del sys.path[0]
 
@@ -196,6 +203,24 @@ def _ledger_state(config) -> dict[str, Any]:
             "problem": writer.write_problem}
 
 
+def _copy_of(name: str) -> str | None:
+    """Intent:
+        The file the module `name` was imported from in this process, or,
+        when it was not imported here (under xdist the workers import the
+        project), the file importing it here would load; None for neither.
+    """
+    import importlib.util
+
+    module = sys.modules.get(name)
+    if module is not None:
+        return getattr(module, "__file__", None)
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, ValueError):
+        return None
+    return spec.origin if spec is not None and spec.has_location else None
+
+
 def pytest_unconfigure(config) -> None:
     if _state is None or hasattr(config, "workerinput"):
         return
@@ -203,11 +228,9 @@ def pytest_unconfigure(config) -> None:
               "tests": 0 if _state.no_test_runs else len(_state.nodeids), "ledger": _ledger_state(config),
               "missing": _state.missing,
               "coverage_taken": (config.pluginmanager.hasplugin(COV_PLUGIN)
-                                 and not getattr(config.option, "no_cov", False))}
+                                 and not getattr(config.option, "no_cov", False)),
+              "imported": {name: _copy_of(name) for name in _state.packages}}
     try:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(_state.path))
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(record, fh)
-        os.replace(tmp, _state.path)
+        atomic_write(_state.path, json.dumps(record))
     except OSError as exc:
         print(f"mathema: the session record could not be written ({exc})", file=sys.stderr)
