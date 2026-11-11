@@ -70,6 +70,25 @@ def test_every_workers_lines_reach_the_report(tmp_path):
     assert not list(root.glob(".coverage.*"))
 
 
+# a worker that takes longer to exit than xdist waits for it (10 seconds),
+# so xdist kills it before coverage's own exit hook can write its data
+SLOW_EXIT = CONFTEST + """
+
+def pytest_configure(config):
+    if hasattr(config, "workerinput"):
+        import atexit
+        import time
+        atexit.register(time.sleep, 12)
+"""
+
+
+def test_a_worker_killed_while_exiting_still_has_its_lines_in_the_report(tmp_path):
+    root = _project(tmp_path)
+    (root / "conftest.py").write_text(SLOW_EXIT)
+    assert run_suite_under_coverage(parse_args(ARGS), str(root)) == 0
+    assert _executed(root) == {1, 2, 3, 4, 5, 6}
+
+
 def test_a_failing_suite_keeps_its_status_and_its_lines(tmp_path):
     root = _project(tmp_path, zero=1)
     assert run_suite_under_coverage(parse_args(ARGS), str(root)) == 1

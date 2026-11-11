@@ -19,7 +19,10 @@ controlling process, and nothing at all otherwise:
   imported from.
 
 A process with no such file named (an xdist worker, whose environment comes
-after the variable is removed) has no state and every hook returns at once.
+after the variable is removed) has no state and every hook returns at once,
+but for one: a worker writes its coverage data when its session finishes,
+since xdist kills a worker that is slow to exit, before coverage's own
+exit hook can write it.
 """
 from __future__ import annotations
 
@@ -178,8 +181,29 @@ def _settle_junit(config) -> None:
         os.remove(_state.junit_held)
 
 
+def _save_worker_coverage() -> None:
+    """Intent:
+        Write the coverage data this process has collected so far. An
+        xdist worker is given ten seconds to exit and is then killed, and
+        coverage writes its data only as the process exits, so a worker
+        slow to exit on a busy machine would lose every line it ran.
+    """
+    coverage = sys.modules.get("coverage")
+    current = getattr(getattr(coverage, "Coverage", None), "current", None)
+    cov = current() if current is not None else None
+    if cov is None:
+        return
+    try:
+        cov.save()
+    except Exception as exc:
+        print(f"mathema: a worker's coverage data could not be written ({exc})",
+              file=sys.stderr)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus) -> None:
+    if hasattr(session.config, "workerinput"):
+        _save_worker_coverage()
     if _state is None:
         return
     _state.finished_as = int(exitstatus)
