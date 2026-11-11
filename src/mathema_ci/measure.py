@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -419,7 +420,7 @@ def project_packages(root: str) -> list[str]:
     for base in (root, os.path.join(root, "src")):
         try:
             names = os.listdir(base)
-        except OSError:
+        except (OSError, ValueError):
             continue
         for name in names:
             path = os.path.join(base, name)
@@ -484,16 +485,17 @@ def _another_copy(outside: list[tuple[str, str]], root: str, where: str) -> str:
 
 def in_process_copies(root: str, names: Sequence[str]) -> dict[str, str | None]:
     """Where this process imports each of `names` from, with the project
-    at `root` on the import path as verify puts it: the module already
-    loaded, else where the import would find it; None for neither."""
-    _importable(root)
+    at `root` in front of the import path as verify puts it: the module
+    already loaded, else where the import would find it; None for
+    neither. The import path itself is left as it is."""
     out: dict[str, str | None] = {}
+    search = [root] + [p for p in sys.path if p != root]
     for name in names:
         module = sys.modules.get(name)
         path = getattr(module, "__file__", None) if module is not None else None
         if path is None and module is None:
             try:
-                spec = importlib.util.find_spec(name)
+                spec = importlib.machinery.PathFinder.find_spec(name, search)
             except (ImportError, ValueError):
                 spec = None
             path = spec.origin if spec is not None and spec.has_location else None

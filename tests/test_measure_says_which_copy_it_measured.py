@@ -30,6 +30,7 @@ def test_the_project_s_packages_are_read_from_its_layout(tmp_path):
                 "noinit/mod.py"):
         _touch(tmp_path / rel)
     assert project_packages(str(tmp_path)) == ["billing", "calc", "shop", "tools"]
+    assert project_packages("bad\x00root") == project_packages(str(tmp_path / "none")) == []
 
 
 def test_a_copy_outside_the_root_or_installed_under_it_is_not_the_project_s(tmp_path):
@@ -80,3 +81,18 @@ def test_tests_that_import_the_project_s_own_copy_say_so(tmp_path):
     done = measure(root, "--no-readme")
     assert "measure: imported pricing from this project (pricing.py)" in done.stderr, \
         done.stdout + done.stderr
+
+
+def test_finding_the_copies_leaves_the_import_path_as_it_was(tmp_path, monkeypatch):
+    import sys
+
+    from mathema_ci.measure import in_process_copies
+
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    (tmp_path / "copy_probe_mod.py").write_text("")
+    before = list(sys.path)
+    found = in_process_copies(str(tmp_path), ["copy_probe_mod", "no_such_module_here"])
+    assert found == {"copy_probe_mod": str(tmp_path / "copy_probe_mod.py"),
+                     "no_such_module_here": None}
+    assert in_process_copies("bad\x00root", ["copy_probe_mod"]) == {"copy_probe_mod": None}
+    assert sys.path == before
