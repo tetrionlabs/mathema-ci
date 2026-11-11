@@ -227,15 +227,23 @@ def _records_at(root: str, sha: str) -> dict[str, Mapping]:
         return {}
     done = subprocess.run(["git", "cat-file", "--batch"], cwd=root, capture_output=True,
                           input="".join(f"{sha}:{p}\n" for p in paths).encode())
+    if done.returncode:
+        said = done.stderr.decode("utf-8", "replace").strip()
+        raise GateError(f"git cat-file could not read the records at {sha[:7]}: "
+                        f"{said or f'exit {done.returncode}'}")
     data, at = done.stdout, 0
     out: dict[str, Mapping] = {}
     for path in paths:
-        header_end = data.index(b"\n", at)
+        header_end = data.find(b"\n", at)
+        if header_end < 0:
+            raise GateError(f"git cat-file stopped before the record {path} at {sha[:7]}")
         header = data[at:header_end].split()
         at = header_end + 1
         if len(header) < 3 or header[1] != b"blob":
             continue
         size = int(header[2])
+        if at + size > len(data):
+            raise GateError(f"git cat-file stopped inside the record {path} at {sha[:7]}")
         blob, at = data[at:at + size], at + size + 1
         try:
             doc = yaml.safe_load(blob.decode("utf-8"))
