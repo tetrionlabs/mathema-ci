@@ -183,15 +183,16 @@ def test_on_a_github_merge_commit_the_base_is_head_s_first_parent(origin, tmp_pa
     assert f"against the pull request base at {main} (HEAD^1)" in out
     assert "changed functions   4 (2 new, 2 edited)" in out
     # double's claim held on the base and the head code no longer supports it
-    assert "claim doubles" in out and "proven -> invalidated" in out
-    assert "newly invalidated (was proven, now falsified): fails" in out
+    assert "claim doubles" in out and "proven -> falsified" in out
+    assert "newly regressed (was proven, now falsified): fails" in out
+    assert "    changed since its record (form" in out
     # quad is new and its claim is false from the start
     assert "claim quintuples" in out
     line = next(ln for ln in out.splitlines() if "claim quintuples" in ln)
     assert line.split()[2:] == ["falsified", "newly", "falsified:", "fails"]
     assert "calc.triple" in out and "new function" in out
-    assert ("1 falsified, 0 invalidated and 0 unknown claims on functions this change "
-            "did not touch") in out
+    assert ("1 falsified and 0 unknown claims, and 0 open transitions, on functions this "
+            "change did not touch") in out
     assert "PASSED" not in out and "passed in" not in out
 
 
@@ -238,7 +239,7 @@ def test_json_carries_the_rows(origin, tmp_path):
     assert set(keys) == {"calc.double", "calc.half", "calc.triple", "calc.quad"}
     assert keys["calc.triple"]["kind"] == "new"
     assert keys["calc.double"]["claims"][0]["grade"] == (
-        "newly invalidated (was proven, now falsified)")
+        "newly regressed (was proven, now falsified)")
     assert keys["calc.quad"]["claims"][0]["grade"] == "newly falsified"
     assert doc["debt"]["untouched_falsified"] == 1
     assert keys["calc.half"]["base_clarity"] is not None
