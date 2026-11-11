@@ -24,6 +24,8 @@ from datetime import date, timedelta
 
 from mathema.badges import BadgeScores
 
+from mathema_pytest._atomic import atomic_write
+
 from .overall import ADAPT_UNTIL
 from .overall import overall as overall_score
 from .render import render_svg, render_triangle, shields_payloads
@@ -208,22 +210,6 @@ def _in_the_way(planned: dict[str, bytes], recorded: dict[str, str],
     return sorted(found)
 
 
-def _write_atomically(path: str, data: bytes) -> None:
-    """Intent:
-        `data` at `path` through a temporary file in the same directory, so
-        the path holds the old bytes or the new ones and never a part.
-    """
-    tmp = f"{path}.{os.getpid()}.tmp"
-    try:
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
-
-
 def _rendered_on_some_day(scores: BadgeScores, name: str, text: str) -> bool:
     """Intent:
         Whether `text` is the file `name` for `scores` on a day either side
@@ -279,7 +265,7 @@ def write_badges(scores: BadgeScores, out_dir: str, *, owned: bool = False,
     written = []
     for name, data in planned.items():
         path = os.path.join(out_dir, name)
-        _write_atomically(path, data)
+        atomic_write(path, data)
         written.append(path)
 
     pruned = []
@@ -290,7 +276,7 @@ def write_badges(scores: BadgeScores, out_dir: str, *, owned: bool = False,
             pruned.append(path)
     manifest = {"schema": _MANIFEST_SCHEMA,
                 "files": {name: _digest(data) for name, data in planned.items()}}
-    _write_atomically(os.path.join(out_dir, _MANIFEST),
+    atomic_write(os.path.join(out_dir, _MANIFEST),
                       (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     return written, pruned, sorted(blocking)
 

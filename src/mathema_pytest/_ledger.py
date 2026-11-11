@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ._atomic import atomic_write
 from ._digest import encode, json_digest, sha256_hex, source_digest, type_only
 
 SCHEMA = 1
@@ -239,10 +240,4 @@ def write(path: Path, text: str) -> None:
         directory, so a reader never sees a half-written ledger.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    atomic_write(path, text)
