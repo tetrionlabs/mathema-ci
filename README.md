@@ -37,8 +37,8 @@ More in [docs/init.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/
 
 ## gate
 
-Fails a change that makes a claim falsified, invalidated or unknown, or
-lowers clarity, on a function it touches. It runs no tests, so it runs
+Fails a change that makes a claim falsified or unknown, opens a
+regression on it, or lowers clarity, on a function it touches. It runs no tests, so it runs
 after `mathema verify` or `measure`.
 
 ```

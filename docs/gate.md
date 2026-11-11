@@ -1,8 +1,8 @@
 # mathema-ci gate
 
-`mathema-ci gate` fails a change that makes a claim falsified,
-invalidated or unknown, or lowers clarity, on a function the change
-touches. It runs no tests and adjudicates nothing: it reads the verified
+`mathema-ci gate` fails a change that makes a claim falsified or
+unknown, opens a regression on it, or lowers clarity, on a function the
+change touches. It runs no tests and adjudicates nothing: it reads the verified
 store, so in CI it runs after `mathema verify` (or `mathema-ci measure`)
 has brought the store up to date.
 
@@ -33,15 +33,31 @@ module-level class.
 
 ## What fails
 
-A claim fails when it is in one of the three states `mathema verify`
-fails in every mode and was not in that state on the base, each under
-its own name:
+A claim keeps the verdict its latest adjudication found. When that
+verdict is weaker than the one before, `mathema verify` keeps the move
+beside the claim as an open transition until a person acknowledges it or
+the claim recovers: `regressed` (proven or holds to falsified) or
+`weakened` (proven to holds, or proven or holds to unknown or skipped).
+A record written before mathema 0.6.5 stores a regression as the verdict
+`invalidated`; the gate reads it as mathema does, as the verdict the claim
+fell to with the move as an open transition, so both formats grade
+alike.
 
-| State on the head | Grade | Means |
+A claim fails when `mathema verify` would fail it in every mode and it
+did not block that way on the base. The grade names the transition that
+is new on the head, else the claim's state:
+
+| On the head | Grade | Means |
 |---|---|---|
+| an open regression | newly regressed (was proven, now falsified) | the claim was supported and the code now violates it |
+| a weakening to unknown or skipped | newly weakened (was holds, now unknown) | the claim was supported and is no longer; a person accepts the risk at the level it fell from |
 | `falsified` | newly falsified | the code violates the claim at a witness |
-| `invalidated` | newly invalidated (was proven, now falsified) | the claim was proven or held before and the current code no longer supports it |
 | `unknown`, not accepted as risk | new unknown | adjudication ran and decided nothing |
+
+Which transitions fail is mathema's to say: the gate asks the installed
+mathema, and a project's `.mathema/meta/policy.yaml` (`transitions:`)
+changes it for the gate as it does for verify. A weakening from proven to
+holds only warns under lenient verify, so it does not block.
 
 These never block, each for verify's own reason:
 
@@ -54,11 +70,16 @@ These never block, each for verify's own reason:
 | `declared`, `documented` | not adjudicated yet, or intent rather than a claim |
 | a discovery or a historical row | no longer a live claim |
 
+`invalidated` names a function: one that changed since its record, by
+the triggers verify found (its form, a dependency, a library version,
+...). The gate shows it on the function's row, `changed since its record
+(form)`, and never fails on it.
+
 Clarity fails when it is lower on the head than on the base, for a
 function both sides define and both scored with the same clarity
-algorithm. A claim already in its state on the base, and every claim on
-a function the change did not touch, is listed as existing debt and does
-not block.
+algorithm. A claim already blocking that way on the base, and every
+claim and open transition on a function the change did not touch, is
+listed as existing debt and does not block.
 
 ## Clarity on each side
 
@@ -87,14 +108,15 @@ Gate on changed code, against the pull request base at 21c9181 (HEAD^1)
   changed functions   4 (2 new, 2 edited)
 
   calc.double           clarity 43% -> 24%      -19   lower: fails
-    claim doubles       proven -> invalidated         newly invalidated (was proven, now falsified): fails
+    changed since its record (form)
+    claim doubles       proven -> falsified           newly regressed (was proven, now falsified): fails
   calc.half             clarity 43% -> 43%        0   same
   calc.quad             clarity 30%                   new function
     claim quintuples    falsified                     newly falsified: fails
   calc.triple           clarity 43%                   new function
 
 Existing debt, not blocking
-  1 falsified, 0 invalidated and 0 unknown claims on functions this change did not touch
+  1 falsified and 0 unknown claims, and 0 open transitions, on functions this change did not touch
 
 Result: fails, 3 findings on changed code (exit 1)
 ```

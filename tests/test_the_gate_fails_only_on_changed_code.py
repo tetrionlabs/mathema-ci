@@ -75,8 +75,8 @@ def test_debt_on_untouched_functions_is_counted_and_does_not_block():
                  clarity={"m.f": 50})
     report = grade({"m.f": "edited"}, _side(clarity={"m.f": 50}, claims={"m.f": {"a": "holds"}}),
                    head)
-    assert (report.untouched_falsified, report.untouched_invalidated,
-            report.untouched_unknown) == (2, 0, 1)
+    assert (report.untouched_falsified, report.untouched_unknown,
+            report.untouched_transitions) == (2, 1, 0)
     assert exit_code(report) == 0
 
 
@@ -137,7 +137,7 @@ Gate on changed code, against main at 4252a3b (merge base)
   m.h               clarity 30% -> 30%     0   same
 
 Existing debt, not blocking
-  1 falsified, 0 invalidated and 0 unknown claims on functions this change did not touch
+  1 falsified and 0 unknown claims, and 0 open transitions, on functions this change did not touch
 
 Result: fails, 3 findings on changed code (exit 1)"""
 
@@ -159,31 +159,10 @@ def test_the_json_carries_the_same_rows():
     assert row == {"key": "m.f", "kind": "edited", "base_clarity": 52, "head_clarity": 41,
                    "difference": -11, "grade": "lower", "fails": True,
                    "claims": [{"name": "rounds", "base": "holds", "head": "falsified",
-                               "grade": "newly falsified", "fails": True}]}
-    assert doc["debt"] == {"untouched_falsified": 0, "untouched_invalidated": 0,
-                           "untouched_unknown": 0, "carried": 0}
-
-
-INVALIDATED = {"name": "doubles", "verdict": "invalidated",
-               "meta": {"mathema.previous_verdict": "proven",
-                        "mathema.regressed_to": "falsified"}}
-
-
-def test_a_regression_is_invalidated_under_its_own_name():
-    base = _side(claims={"m.f": {"doubles": "proven"}}, clarity={"m.f": 43})
-    head = _side(claims={"m.f": [INVALIDATED]}, clarity={"m.f": 43})
-    report = grade({"m.f": "edited"}, base, head)
-    (claim,) = report.functions[0].claims
-    assert (claim.base, claim.head) == ("proven", "invalidated")
-    assert claim.grade == "newly invalidated (was proven, now falsified)"
-    assert claim.fails and exit_code(report) == 1
-    text = render_text(report, "main")
-    assert "proven -> invalidated" in text
-    assert "newly invalidated (was proven, now falsified): fails" in text
-    assert "newly falsified" not in text
-    doc = json.loads(render_json(report, "main"))
-    assert doc["functions"][0]["claims"][0]["head"] == "invalidated"
-    assert doc["functions"][0]["claims"][0]["regressed_to"] == "falsified"
+                               "grade": "newly falsified", "fails": True}],
+                   "changed_since_record": []}
+    assert doc["debt"] == {"untouched_falsified": 0, "untouched_unknown": 0,
+                           "untouched_transitions": 0, "carried": 0}
 
 
 def test_a_fresh_falsified_claim_on_a_new_function_reads_as_falsified():
@@ -191,14 +170,6 @@ def test_a_fresh_falsified_claim_on_a_new_function_reads_as_falsified():
     report = grade({"m.g": "new"}, _side(), head)
     (claim,) = report.functions[0].claims
     assert (claim.base, claim.head, claim.grade) == (None, "falsified", "newly falsified")
-
-
-def test_untouched_invalidated_claims_are_counted_by_their_own_name():
-    head = _side(claims={"m.old": [INVALIDATED], "m.f": {"a": "holds"}}, clarity={"m.f": 1})
-    report = grade({"m.f": "edited"}, _side(claims={"m.f": {"a": "holds"}}, clarity={"m.f": 1}),
-                   head)
-    assert (report.untouched_falsified, report.untouched_invalidated) == (0, 1)
-    assert "0 falsified, 1 invalidated and 0 unknown claims" in render_text(report, "main")
 
 
 def test_what_does_not_block_and_why():
@@ -231,7 +202,9 @@ def test_the_meanings_count_as_core_s_verify_gate_counts_them():
 
     claims = [
         {"name": "a", "verdict": "proven"}, {"name": "b", "verdict": "holds"},
-        {"name": "c", "verdict": "falsified"}, INVALIDATED,
+        {"name": "c", "verdict": "falsified"},
+        {"name": "d", "verdict": "invalidated",
+         "meta": {"mathema.previous_verdict": "proven", "mathema.regressed_to": "falsified"}},
         {"name": "e", "verdict": "unknown"},
         {"name": "f", "verdict": "unknown", "accepted": {"as": "risk"}},
         {"name": "g", "verdict": "skipped:unknown_but_accepted"},
@@ -242,7 +215,6 @@ def test_the_meanings_count_as_core_s_verify_gate_counts_them():
     ]
     core = gate(claims, strict=False, accepted_risk=_accepted_risk({"claims": claims}))
     ours = [s.meaning for s in claim_states(claims).values()]
-    assert (ours.count("falsified"), ours.count("invalidated"), ours.count("unknown"),
-            ours.count("accepted risk"), ours.count("skipped"), ours.count("proven"),
-            ours.count("holds")) == (core.falsified, core.invalidated, core.unknown,
-                                     core.owned, core.skipped, core.proven, core.holds)
+    assert (ours.count("falsified"), ours.count("unknown"), ours.count("accepted risk"),
+            ours.count("skipped"), ours.count("proven"), ours.count("holds")) == (
+        core.falsified, core.unknown, core.owned, core.skipped, core.proven, core.holds)

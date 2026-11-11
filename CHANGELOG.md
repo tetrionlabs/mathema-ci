@@ -22,8 +22,8 @@ Notable changes to mathema-ci are recorded here from its first public release on
 - `mathema-ci init` writes a pull or merge request template and the CI
   workflow that runs `mathema verify`, for GitHub, GitLab or both, only
   where a file is missing.
-- `mathema-ci gate` fails a change that makes a claim falsified,
-  invalidated or unknown, or lowers clarity, on a function it touches,
+- `mathema-ci gate` fails a change that makes a claim falsified or
+  unknown, opens a regression on it, or lowers clarity, on a function it touches,
   and lets existing debt through. It finds the base on GitHub, on GitLab
   or with `--base`, and re-measures a base with no committed snapshot by
   itself, within a time budget. It exits 0, 1 or 2 as `mathema verify`

@@ -3,15 +3,24 @@
 """The gate's grading: what a change did to the functions it touches.
 
 Each side, the base and the head, is its claims, each read as mathema
-verify's gate reads it, and its functions' clarity. A claim blocks when
-verify fails it in every mode:
+verify's gate reads it, and its functions' clarity. A claim keeps the
+verdict its latest adjudication found; a move from the level before it
+is a transition kept beside it (`regressed`, `weakened`, `strengthened`
+or `fixed`) until a person acknowledges it or the claim recovers. A
+record written before mathema 0.6.5 stores a regression as the verdict
+`invalidated`, which core's reader turns into the fresh verdict and an
+open transition, so both formats grade alike.
+
+A claim blocks when verify's lenient gate fails it, so it fails in every
+mode:
 
 - `falsified`: the code violates the claim at a witness;
-- `invalidated`: the claim was proven or held before and the current code
-  no longer supports it; the record keeps the verdict it had and the one
-  it regressed to;
 - `unknown`, unless a person accepted it as risk and the acceptance is
-  not stale.
+  not stale;
+- an open transition whose action under lenient is `fail`: by default a
+  regression, and a supported claim fallen to unknown or skipped where
+  the installed core asks for a risk sign-off. A weakening from proven
+  to holds only warns under lenient, so it does not block.
 
 These do not block, each for verify's own reason:
 
@@ -20,7 +29,7 @@ These do not block, each for verify's own reason:
   in its strict mode, and reports them;
 - `suggestion`: a claim mathema volunteered itself, or a line under one,
   never gates until a person adopts it (a volunteered policy row gates,
-  as in verify);
+  as in verify), though a failing transition on it does;
 - `foreign grammar`: verify collects these for the caller rather than
   gating them;
 - `declared` and `documented`: not adjudicated yet, or intent rather than
@@ -28,30 +37,38 @@ These do not block, each for verify's own reason:
 - a discovery or a historical row is no longer a live claim, so it is not
   read at all.
 
+`invalidated` names a function, not a claim: one that changed since its
+record, by the triggers verify stored (`meta["mathema.invalidated_by"]`).
+The gate reports it on the function's row and never fails on it.
+
 For every changed function the gate compares the two sides: a claim that
-blocks on the head fails when the base did not have it in that state,
-under the state's own name (newly falsified, newly invalidated, new
-unknown), and clarity lower on the head than on the base fails, for a
-function both sides define and both scored, with the same clarity
-algorithm, and the base's scoring not stopped at the wall-clock cap. A
-claim already in its blocking state on the base is debt the change
-carried, and claims on functions the change did not touch are debt it
-left alone; neither blocks. Everything here is pure: the sides come in as
+blocks on the head fails when the base did not have it blocking the same
+way, graded by the transition that is new on the head (newly regressed,
+newly weakened) or else by its meaning (newly falsified, new unknown),
+and clarity lower on the head than on the base fails, for a function
+both sides define and both scored, with the same clarity algorithm, and
+the base's scoring not stopped at the wall-clock cap. A claim already
+blocking that way on the base is debt the change carried, and claims and
+open transitions on functions the change did not touch are debt it left
+alone; neither blocks. Everything here is pure: the sides come in as
 data.
 """
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from mathema import transitions as _core_transitions
 from mathema.records import classify_verdict
+from mathema.transitions import DEFAULT_ACTIONS, open_transitions, read_invalidated_verdict
 
 __all__ = ["BLOCKING", "ClaimRow", "ClaimState", "FunctionRow", "Report", "Side",
-           "claim_states", "exit_code", "grade", "render_json", "render_text"]
+           "Transition", "changed_since_record", "claim_states", "exit_code", "grade",
+           "render_json", "render_text"]
 
-# The meanings verify fails in every mode.
-BLOCKING = ("falsified", "invalidated", "unknown")
+# The verdict meanings verify fails in every mode.
+BLOCKING = ("falsified", "unknown")
 
 # Why each meaning that is not blocking lets a change through.
 _WHY_NOT = {
@@ -65,27 +82,57 @@ _WHY_NOT = {
 
 
 @dataclass(frozen=True)
+class Transition:
+    """An open transition on a claim: its `kind`, the verdict it moved
+    from (`frm`) and to, and its cause as core names it."""
+
+    kind: str
+    frm: str
+    to: str
+    cause: str
+
+    @property
+    def move(self) -> tuple[str, str, str]:
+        """What the transition records, without its cause: the same move
+        read from either record format."""
+        return self.kind, self.frm, self.to
+
+
+def _lenient_action(t: Mapping, actions: Mapping | None) -> str:
+    """Intent:
+        What verify's lenient gate does with the open transition `t`:
+        `fail`, `warn` or `pass`, decided by the installed core.
+    """
+    action_for = getattr(_core_transitions, "action_for", None)
+    if action_for is not None:
+        return action_for(dict(t), "lenient", dict(actions) if actions else None)
+    entry = (actions or DEFAULT_ACTIONS).get(str(t.get("kind") or "")) or {}
+    return entry.get("lenient", "fail")
+
+
+@dataclass(frozen=True)
 class ClaimState:
     """A claim as the gate reads it: its `meaning` (a verdict family, or
     `accepted risk`, `suggestion` or `foreign grammar`), its verdict as
-    recorded, and for an invalidated claim the verdict it had before and
-    the one it regressed to."""
+    core reads it, and its open transitions, split into those verify's
+    lenient gate fails (`failing`) and warns on (`warning`)."""
 
     meaning: str
     verdict: str
-    previous: str | None = None
-    regressed_to: str | None = None
+    transitions: tuple[Transition, ...] = ()
+    failing: tuple[Transition, ...] = ()
+    warning: tuple[Transition, ...] = ()
 
     @property
     def blocks(self) -> bool:
         """Whether verify fails a claim in this state in every mode."""
-        return self.meaning in BLOCKING
+        return self.meaning in BLOCKING or bool(self.failing)
 
     @property
     def why(self) -> str | None:
         """Why a claim in this state does not block, or None when it
         blocks or is supported."""
-        return _WHY_NOT.get(self.meaning)
+        return None if self.blocks else _WHY_NOT.get(self.meaning)
 
 
 def _volunteered(meta: Mapping, note: str) -> bool:
@@ -96,9 +143,19 @@ def _volunteered(meta: Mapping, note: str) -> bool:
     return meta.get("mathema.surface") == "mathema" or note.startswith("conjectured by mathema")
 
 
-def claim_states(claims: list) -> dict[str, ClaimState]:
+def _transition(t: Mapping) -> Transition:
+    """Intent:
+        A transition as stored, as the gate's value.
+    """
+    return Transition(str(t.get("kind") or ""), str(t.get("from") or ""),
+                      str(t.get("to") or ""), str(t.get("cause") or ""))
+
+
+def claim_states(claims: list, actions: Mapping | None = None) -> dict[str, ClaimState]:
     """`{name: ClaimState}` for a record's live claims, each read by the
-    rules verify's gate applies to them (see the module docstring)."""
+    rules verify's gate applies to them (see the module docstring), with
+    `actions` the project's transition actions (core's
+    `transitions.load_actions`; core's defaults when None)."""
     rows = [c for c in claims if isinstance(c, Mapping) and c.get("name")]
 
     def fields(c):
@@ -107,13 +164,14 @@ def claim_states(claims: list) -> dict[str, ClaimState]:
     suggested = {c["name"] for c in rows if _volunteered(*fields(c))}
     out: dict[str, ClaimState] = {}
     for c in rows:
-        meta, note = fields(c)
-        verdict = c.get("verdict") or ""
+        verdict, meta = read_invalidated_verdict(c.get("verdict") or "", dict(fields(c)[0]))
+        note = fields(c)[1]
         family = classify_verdict(verdict)
         accepted = c.get("accepted") or {}
         if "mathema.foreign_grammar" in meta:
-            meaning = "foreign grammar"
-        elif meta.get("mathema.companion_of") in suggested:
+            out[c["name"]] = ClaimState("foreign grammar", verdict)
+            continue
+        if meta.get("mathema.companion_of") in suggested:
             meaning = "suggestion"
         elif _volunteered(meta, note) and not meta.get("mathema.policy"):
             meaning = "suggestion"
@@ -123,9 +181,19 @@ def claim_states(claims: list) -> dict[str, ClaimState]:
             meaning = "accepted risk"
         else:
             meaning = family
-        out[c["name"]] = ClaimState(meaning, verdict, meta.get("mathema.previous_verdict"),
-                                    meta.get("mathema.regressed_to"))
+        acted = [(_transition(t), _lenient_action(t, actions)) for t in open_transitions(meta)]
+        out[c["name"]] = ClaimState(
+            meaning, verdict, tuple(t for t, _ in acted),
+            tuple(t for t, a in acted if a == "fail"),
+            tuple(t for t, a in acted if a == "warn"))
     return out
+
+
+def changed_since_record(entry: Mapping) -> tuple[str, ...]:
+    """The triggers verify found for a function that changed since its
+    record (`meta["mathema.invalidated_by"]`), empty when it did not or
+    the record predates mathema 0.6.5."""
+    return tuple((entry.get("meta") or {}).get("mathema.invalidated_by") or ())
 
 
 @dataclass(frozen=True)
@@ -134,34 +202,38 @@ class Side:
     claims' states by name (`claim_states`); `clarity` maps a key to its
     clarity (None when the function posed no question; a key missing
     when it was not scored); `capped` holds the keys whose clarity
-    stopped at the wall-clock cap; `algo` is the clarity algorithm."""
+    stopped at the wall-clock cap; `algo` is the clarity algorithm;
+    `changed_since_record` maps a key to the triggers that made its
+    function invalidated (`changed_since_record`)."""
 
     claims: Mapping[str, Mapping[str, ClaimState]]
     clarity: Mapping[str, int | None]
     capped: frozenset[str]
     algo: str | None
+    changed_since_record: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class ClaimRow:
-    """A claim the change made falsified, invalidated or unknown: its
-    meaning on the base (None when it was not there) and on the head, and
-    for an invalidated claim the verdict it regressed to."""
+    """A claim the change made block: its meaning on the base (None when
+    it was not there) and on the head, its grade, and the transition the
+    grade names (None when the grade names the meaning)."""
 
     name: str
     base: str | None
     head: str
     grade: str
     fails: bool = True
-    regressed_to: str | None = None
+    transition: Transition | None = None
 
 
 @dataclass(frozen=True)
 class FunctionRow:
     """A changed function: `kind` is `edited` or `new`; its clarity on
     each side, their difference (head minus base, None when not
-    compared), the plain-word grade, whether it fails, and the claims
-    the change made falsified or unknown."""
+    compared), the plain-word grade, whether it fails, the claims the
+    change made block, and the triggers that make it changed since its
+    record (empty when it is not)."""
 
     key: str
     kind: str
@@ -171,19 +243,21 @@ class FunctionRow:
     grade: str
     fails: bool
     claims: tuple[ClaimRow, ...]
+    changed_since_record: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Report:
     """The gate's result: a row per changed function, sorted by key, and
-    the debt that does not block: falsified, invalidated and unknown
-    claims on functions the change did not touch, and those on changed
-    functions that were in the same state on the base (`carried`)."""
+    the debt that does not block: falsified and unknown claims and open
+    transitions on functions the change did not touch, and blocking
+    claims on changed functions that blocked the same way on the base
+    (`carried`)."""
 
     functions: tuple[FunctionRow, ...]
     untouched_falsified: int
-    untouched_invalidated: int
     untouched_unknown: int
+    untouched_transitions: int
     carried: int
 
     @property
@@ -192,16 +266,25 @@ class Report:
         return sum(row.fails + sum(c.fails for c in row.claims) for row in self.functions)
 
 
-def _grade_of(state: ClaimState) -> str:
+def _newly(state: ClaimState, then: ClaimState | None) -> tuple[str, Transition | None] | None:
     """Intent:
-        The grade of a claim newly in a blocking state, under that state's
-        own name.
+        How a claim blocking on the head is new against its state on the
+        base, `then`: its grade and the transition the grade names. A
+        transition the base did not carry names the grade, a failing one
+        first; else a blocking meaning the base did not have does. None
+        when the claim blocked the same way on the base.
     """
-    if state.meaning == "invalidated":
-        was = state.previous or "supported"
-        now = state.regressed_to or "unsupported"
-        return f"newly invalidated (was {was}, now {now})"
-    return "new unknown" if state.meaning == "unknown" else f"newly {state.meaning}"
+    seen = {t.move for t in then.transitions} if then else set()
+    fresh = sorted((t for t in state.transitions if t.move not in seen),
+                   key=lambda t: t not in state.failing)
+    newly_failing = any(t in state.failing for t in fresh)
+    new_meaning = state.meaning in BLOCKING and (then is None or then.meaning != state.meaning)
+    if not (newly_failing or new_meaning):
+        return None
+    if fresh:
+        t = fresh[0]
+        return f"newly {t.kind} (was {t.frm}, now {t.to})", t
+    return ("new unknown" if state.meaning == "unknown" else f"newly {state.meaning}"), None
 
 
 def _clarity(kind: str, key: str, base: Side, head: Side) -> tuple[int | None, int | None, str]:
@@ -243,17 +326,20 @@ def grade(changed: Mapping[str, str], base: Side, head: Side) -> Report:
             if not state.blocks:
                 continue
             then = before.get(name)
-            if then is not None and then.meaning == state.meaning:
+            new = _newly(state, then)
+            if new is None:
                 carried += 1
                 continue
             claims.append(ClaimRow(name, then.meaning if then else None, state.meaning,
-                                   _grade_of(state), regressed_to=state.regressed_to))
+                                   new[0], transition=new[1]))
         rows.append(FunctionRow(key, kind, base_value, head_value, difference, word,
-                                word == "lower", tuple(claims)))
-    untouched = [state.meaning for key, named in head.claims.items() if key not in changed
+                                word == "lower", tuple(claims),
+                                tuple(head.changed_since_record.get(key) or ())))
+    untouched = [state for key, named in head.claims.items() if key not in changed
                  for state in named.values()]
-    return Report(tuple(rows), untouched.count("falsified"), untouched.count("invalidated"),
-                  untouched.count("unknown"), carried)
+    meanings = [state.meaning for state in untouched]
+    return Report(tuple(rows), meanings.count("falsified"), meanings.count("unknown"),
+                  sum(len(state.transitions) for state in untouched), carried)
 
 
 def exit_code(report: Report) -> int:
@@ -289,8 +375,8 @@ def _plural(n: int, one: str, many: str) -> str:
 def render_text(report: Report, base_label: str) -> str:
     """The console text for `report` against the base named `base_label`:
     each changed function with its clarity, the difference and the grade,
-    under it each claim the change made falsified or unknown, then the
-    debt that does not block and the result."""
+    whether it changed since its record, under it each claim the change
+    made block, then the debt that does not block and the result."""
     lines = [f"Gate on changed code, against {base_label}"]
     rows = report.functions
     if not rows:
@@ -303,26 +389,30 @@ def render_text(report: Report, base_label: str) -> str:
             diff = "" if row.difference is None else (
                 f"+{row.difference}" if row.difference > 0 else str(row.difference))
             table.append((f"  {row.key}", _measure(row), diff, _said(row.grade, row.fails)))
+            if row.changed_since_record:
+                table.append((f"    changed since its record "
+                              f"({', '.join(row.changed_since_record)})", "", "", ""))
             for c in row.claims:
                 said = c.head if c.base is None else f"{c.base} -> {c.head}"
                 table.append((f"    claim {c.name}", said, "", _said(c.grade, c.fails)))
-        name_w = max(len(t[0]) for t in table) + 4
+        name_w = max(len(t[0]) for t in table if t[1] or t[3]) + 4
         measure_w = max(len(t[1]) for t in table)
         diff_w = max([len(t[2]) for t in table] + [1])
         lines.append("")
-        lines += [f"{n:<{name_w}}{m:<{measure_w}}   {d:>{diff_w}}   {g}"
+        lines += [n if not (m or g) else f"{n:<{name_w}}{m:<{measure_w}}   {d:>{diff_w}}   {g}"
                   for n, m, d, g in table]
-    untouched = (report.untouched_falsified, report.untouched_invalidated,
-                 report.untouched_unknown)
-    if any(untouched) or report.carried:
+    if report.untouched_falsified or report.untouched_unknown \
+            or report.untouched_transitions or report.carried:
         lines += ["", "Existing debt, not blocking"]
-        if any(untouched):
-            lines.append(f"  {untouched[0]} falsified, {untouched[1]} invalidated and "
-                         f"{untouched[2]} unknown claims on functions this change did not "
-                         "touch")
+        if report.untouched_falsified or report.untouched_unknown \
+                or report.untouched_transitions:
+            lines.append(f"  {report.untouched_falsified} falsified and "
+                         f"{report.untouched_unknown} unknown claims, and "
+                         f"{_plural(report.untouched_transitions, 'open transition', 'open transitions')}"
+                         ", on functions this change did not touch")
         if report.carried:
             lines.append(f"  {_plural(report.carried, 'claim', 'claims')} on changed "
-                         "functions in the same state on the base")
+                         "functions blocking the same way on the base")
     code = exit_code(report)
     if report.findings:
         result = (f"fails, {_plural(report.findings, 'finding', 'findings')} "
@@ -333,6 +423,13 @@ def render_text(report: Report, base_label: str) -> str:
         result = "passes, no changed function to gate"
     lines += ["", f"Result: {result} (exit {code})"]
     return "\n".join(lines)
+
+
+def _transition_json(t: Transition) -> dict:
+    """Intent:
+        A transition as the JSON states it, in core's field names.
+    """
+    return {"kind": t.kind, "from": t.frm, "to": t.to, "cause": t.cause}
 
 
 def render_json(report: Report, base_label: str) -> str:
@@ -348,15 +445,16 @@ def render_json(report: Report, base_label: str) -> str:
         "functions": [{"key": r.key, "kind": r.kind, "base_clarity": r.base_clarity,
                        "head_clarity": r.head_clarity, "difference": r.difference,
                        "grade": r.grade, "fails": r.fails,
+                       "changed_since_record": list(r.changed_since_record),
                        "claims": [{"name": c.name, "base": c.base, "head": c.head,
                                    "grade": c.grade, "fails": c.fails,
-                                   **({"regressed_to": c.regressed_to}
-                                      if c.head == "invalidated" else {})}
+                                   **({"transition": _transition_json(c.transition)}
+                                      if c.transition else {})}
                                   for c in r.claims]}
                       for r in report.functions],
         "debt": {"untouched_falsified": report.untouched_falsified,
-                 "untouched_invalidated": report.untouched_invalidated,
                  "untouched_unknown": report.untouched_unknown,
+                 "untouched_transitions": report.untouched_transitions,
                  "carried": report.carried},
         "findings": report.findings,
         "result": "fails" if code else "passes",

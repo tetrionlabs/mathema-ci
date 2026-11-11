@@ -47,7 +47,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from .diffmap import changed_functions, module_of, parse_diff
-from .gate import Side, claim_states, exit_code, grade, render_json, render_text
+from .gate import (
+    Side,
+    changed_since_record,
+    claim_states,
+    exit_code,
+    grade,
+    render_json,
+    render_text,
+)
 
 __all__ = ["Base", "GateError", "Probe", "Timing", "find_base", "main", "probe"]
 
@@ -176,13 +184,34 @@ def probe(root: str, modules: list[str], keys: list[str],
     return Probe(answer["clarity"], frozenset(answer["capped"]), answer["files"])
 
 
-def _states(store: Mapping[str, Mapping]) -> dict[str, dict]:
+def _states(store: Mapping[str, Mapping], actions: Mapping) -> dict[str, dict]:
     """Intent:
         `{key: {claim: ClaimState}}` for every record in a store mapping a
-        key to its record entry.
+        key to its record entry, under the project's transition `actions`.
     """
-    return {key: claim_states(list((entry or {}).get("claims") or []))
+    return {key: claim_states(list((entry or {}).get("claims") or []), actions)
             for key, entry in store.items() if isinstance(entry, Mapping)}
+
+
+def _changed_since_record(store: Mapping[str, Mapping]) -> dict[str, tuple[str, ...]]:
+    """Intent:
+        `{key: triggers}` for every record in a store whose function
+        changed since its record.
+    """
+    return {key: found for key, entry in store.items()
+            if isinstance(entry, Mapping) and (found := changed_since_record(entry))}
+
+
+def _actions(root: str) -> dict:
+    """Intent:
+        The project's action per transition kind and mode, as core's
+        verify reads them from `.mathema/meta/policy.yaml`.
+    """
+    from mathema.transitions import load_actions
+    try:
+        return load_actions(root)
+    except ValueError as exc:
+        raise GateError(str(exc)) from None
 
 
 def _records_at(root: str, sha: str) -> dict[str, Mapping]:
@@ -283,12 +312,14 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
     base_sources = {c.base_path: _git(root, "show", f"{base.sha}:{c.base_path}").stdout
                     for c in changes if c.base_path}
     changed = changed_functions(changes, head_sources, base_sources)
-    head_states = _states({key: info.get("entry") or {}
-                           for key, info in load_verified(root).items()
-                           if isinstance(info, Mapping)})
+    actions = _actions(root)
+    head_store = {key: info.get("entry") or {} for key, info in load_verified(root).items()
+                  if isinstance(info, Mapping)}
+    head_states = _states(head_store, actions)
+    head_changed = _changed_since_record(head_store)
     empty = Side({}, {}, frozenset(), CLARITY_ALGO)
     if not changed:
-        return grade({}, empty, Side(head_states, {}, frozenset(), CLARITY_ALGO))
+        return grade({}, empty, Side(head_states, {}, frozenset(), CLARITY_ALGO, head_changed))
 
     base_records = _records_at(root, base.sha)
     snap = None
@@ -313,7 +344,7 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
     timing.head_seconds, timing.head_scored = time.monotonic() - started, len(head.clarity)
     changed = {k: kind for k, kind in changed.items() if k in head.clarity}
     edited = [k for k, kind in changed.items() if kind == "edited"]
-    base_states = _states(base_records)
+    base_states = _states(base_records, actions)
     base_claims = {k: base_states[k] for k in edited if k in base_states}
 
     started = time.monotonic()
@@ -332,7 +363,8 @@ def run_gate(root: str, base: Base, *, snapshot: str | None = None,
         base_side = Side(base_claims, clarity, capped, snap.get("clarity_algo"))
         timing.base_scored = len(clarity)
     timing.base_seconds = time.monotonic() - started
-    head_side = Side(head_states, dict(head.clarity), head.capped, CLARITY_ALGO)
+    head_side = Side(head_states, dict(head.clarity), head.capped, CLARITY_ALGO,
+                     head_changed)
     return grade(changed, base_side, head_side)
 
 
@@ -342,7 +374,7 @@ def _parser() -> argparse.ArgumentParser:
     """
     p = argparse.ArgumentParser(
         prog="mathema-ci gate",
-        description="Fail a change that makes a claim falsified, invalidated or unknown, "
+        description="Fail a change that makes a claim falsified or unknown, opens a regression, "
                     "or lowers clarity, on a function it touches. Runs no tests: run it "
                     "after mathema verify. Exits 0, 1 with a finding, 2 when it cannot run.")
     p.add_argument("--base", metavar="REF", help="compare with the merge base of REF and HEAD")
