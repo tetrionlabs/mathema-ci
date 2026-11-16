@@ -21,8 +21,7 @@ mathema-ci measure --out
 `--out` writes the badge files to `.mathema/badges/`, `--target MODULE`
 scores the functions defined in MODULE, `--stage` keeps the claims read
 from the tests that hold, and everything after `--` goes to pytest. The
-overall is equal wedges, which differs from mathema 0.6.4's overall until
-mathema computes it too. More in [docs/measure.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/measure.md).
+overall is the area spanned by all three scores. More in [docs/measure.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/measure.md).
 
 ## init
 

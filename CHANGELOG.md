@@ -12,11 +12,7 @@ Notable changes to mathema-ci are recorded here from its first public release on
   the badge files, never overwriting one it did not write. It exits as
   the tests did. `--target MODULE` scores the functions defined in a
   module; `--stage` keeps the claims read from the tests that hold.
-- Overall is equal wedges, the mean of the three pairwise products of
-  the scores. It differs from mathema 0.6.4's overall (48 against 41 at
-  88, 71 and 52); mathema-ci computes it itself until 2026-11-19, after
-  which it is mathema's own, or unknown, with a line saying so, on a
-  mathema that predates it.
+- Overall is the area spanned by all three scores.
 - The SVG card's shaded share of its frame is the overall: its three
   spokes run from the centre, 120 degrees apart.
 - `mathema-ci init` writes a pull or merge request template and the CI

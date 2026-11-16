@@ -18,14 +18,8 @@ verified store knows, as `mathema badges` does with no target.
 `--target MODULE` scores every function defined in MODULE, as
 `mathema badges MODULE` does, and can be given more than once.
 
-The overall is equal wedges: the mean of the three pairwise products of
-implementation, intent and clarity, the share of the triangle's frame
-the three cover. It is not mathema 0.6.4's overall for the same scores
-(48 against 41 at 88, 71 and 52). Up to and including 2026-11-19, the day
-in UTC, mathema-ci computes it itself; after that it is mathema's
-`triangle_area` when the installed mathema computes equal wedges too,
-and otherwise overall is unknown and `measure` says the installed
-mathema predates it.
+The overall is the area spanned by all three scores. Each score is
+between 0 and 100%.
 
 ## The tests
 
