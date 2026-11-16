@@ -69,8 +69,9 @@ from .render import render_triangle
 
 __all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "SuiteStatus",
            "UnreadableModules", "assess_session", "copies_outside", "imported_line",
-           "in_process_copies", "main", "modules_in_report", "parse_args",
-           "project_function_key", "project_packages", "run",
+           "in_process_copies", "library_claims", "library_line", "main",
+           "modules_in_report", "parse_args", "population", "project_function_key",
+           "project_packages", "run", "stored_library_claims",
            "suite_command"]
 
 T = TypeVar("T")
@@ -672,6 +673,49 @@ def verify_project(root: str) -> Verified:
     return sweep(root)
 
 
+def population(targets: Sequence[str], root: str) -> list[str]:
+    """What measure scores: the `targets` given, else the project's own
+    packages and modules (`project_packages`). Empty when none is given
+    and the project has none, and then the store's functions are scored."""
+    return list(targets) or project_packages(root)
+
+
+def library_claims(keys: Iterable[str], packages: Sequence[str]) -> dict[str, int]:
+    """How many of the store's function `keys` belong to none of the
+    project's `packages`, counted by their top-level name: the claims
+    about libraries, which the project's scores leave out. Empty when no
+    packages are given, since nothing then tells a library from the
+    project."""
+    own = set(packages)
+    counts: dict[str, int] = {}
+    if not own:
+        return counts
+    for key in keys:
+        top = key.partition(".")[0]
+        if top not in own:
+            counts[top] = counts.get(top, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def library_line(counts: Mapping[str, int]) -> str | None:
+    """The line saying the claims about libraries are not in the scores,
+    each library with its count, the largest first; None when there are
+    none."""
+    if not counts:
+        return None
+    named = ", ".join(f"{name} {n}" for name, n in
+                      sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+    return f"Claims about libraries are kept apart from these scores: {named}."
+
+
+def stored_library_claims(root: str, packages: Sequence[str]) -> dict[str, int]:
+    """`library_claims` over the functions in the verified store at
+    `root`."""
+    from mathema.spec import load_verified
+
+    return library_claims(load_verified(root), packages)
+
+
 def score_project(root: str, targets: Sequence[str] = ()) -> BadgeScores:
     """The project's scores, through mathema's `repo_badges`, with the
     project importable: every function defined in `targets`, or with no
@@ -1107,7 +1151,8 @@ def run(options: Options, *, root: str,
         score: Callable[[str], BadgeScores],
         remote: Callable[[str], str | None],
         function_key: Callable[[str], str | None],
-        imported: Mapping[str, str | None] | None = None) -> int:
+        imported: Mapping[str, str | None] | None = None,
+        libraries: Callable[[str], Mapping[str, int]] | None = None) -> int:
     """`measure` with its effects passed in: `run_suite` runs the tests
     and returns pytest's exit status, `reader` reads and stages claims
     from them (None when mathema has none), `verify` records the
@@ -1115,7 +1160,8 @@ def run(options: Options, *, root: str,
     project, `remote` names its git remote and `function_key` names one
     of its functions. `imported` is where this
     process imports the project's packages from, said beside where the
-    tests imported them. Returns the tests' exit status, whatever was found
+    tests imported them, and `libraries` counts the store's claims about
+    libraries, which the scores leave out. Returns the tests' exit status, whatever was found
     or failed after them, an interrupt included: 128 plus the signal when a
     signal killed pytest."""
     status = run_suite(options, root)
@@ -1127,7 +1173,8 @@ def run(options: Options, *, root: str,
         _say(said, sys.stderr)
     try:
         _report(options, root=root, status=status, reader=reader, verify=verify,
-                score=score, remote=remote, function_key=function_key)
+                score=score, remote=remote, function_key=function_key,
+                libraries=libraries)
     except KeyboardInterrupt:
         _say("measure: interrupted after the tests; the exit status is the tests' own",
              sys.stderr)
@@ -1140,7 +1187,8 @@ def run(options: Options, *, root: str,
 def _report(options: Options, *, root: str, status: int, reader: Reader | None,
             verify: Callable[[str], Verified], score: Callable[[str], BadgeScores],
             remote: Callable[[str], str | None],
-            function_key: Callable[[str], str | None]) -> None:
+            function_key: Callable[[str], str | None],
+            libraries: Callable[[str], Mapping[str, int]] | None = None) -> None:
     """Intent:
         Everything after a measured run: read and stage the claims, record
         them, score, print, keep the README block and write the badges.
@@ -1163,6 +1211,11 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         if not nothing_declared and None not in known:
             sections.append([render_triangle(*known)])
         sections.append(score_lines(scores, known_only=nothing_declared))
+        if libraries is not None:
+            counted, _ = _attempt(lambda: libraries(root))
+            apart = library_line(counted or {})
+            if apart is not None:
+                sections.append([apart])
     else:
         sections.append(["What is known about your code",
                          f"  could not be worked out ({unscored})"])
@@ -1257,9 +1310,11 @@ def main(argv: list[str]) -> int:
         _say(f"measure: {_another_copy(outside, root, 'mathema-ci itself')}; nothing "
              "measured", sys.stderr)
         return 2
+    scored = population(options.targets, root)
     return run(options, root=root, imported=here,
                run_suite=run_suite_under_coverage, reader=core_reader(),
                verify=verify_project,
-               score=lambda root: score_project(root, options.targets),
+               score=lambda root: score_project(root, scored),
                remote=origin_remote,
-               function_key=lambda root: project_function_key(root, options.targets))
+               function_key=lambda root: project_function_key(root, scored),
+               libraries=lambda root: stored_library_claims(root, project_packages(root)))

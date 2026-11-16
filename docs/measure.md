@@ -13,10 +13,11 @@ mathema-ci measure [--out [DIR]] [--target MODULE ...] [--stage] [--junit PATH]
 
 ## What it scores
 
-With no `--target` it scores every function mathema's declared or
-verified store knows, as `mathema badges` does with no target.
-`--target MODULE` scores every function defined in MODULE, as
-`mathema badges MODULE` does, and can be given more than once.
+With no `--target` it scores your project's own packages: every function
+defined in the packages and modules at the project's root or under
+`src`. `--target MODULE` scores every function defined in MODULE, and can
+be given more than once. Claims about libraries, such as numpy, are
+counted apart and are not part of the scores.
 
 The overall is the area spanned by all three scores. Each score is
 between 0 and 100%.
