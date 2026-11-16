@@ -17,7 +17,7 @@ authors = [{ name = "Tetrion Ltd", email = "contact@tetrion.co" }]
 # contract; it moves on minor releases, so the range stops before the
 # next one. measure runs the suite with pytest under coverage, which from
 # 7.13 measures the processes pytest-xdist starts.
-dependencies = ["mathema>=0.6.4,<0.7", "pyyaml>=6", "coverage>=7.13",
+dependencies = ["mathema>=0.6.5,<0.7", "pyyaml>=6", "coverage>=7.13",
                 "pytest>=8"]
 keywords = ["mathema", "continuous-integration", "code-coverage",
             "claim-driven-development", "github-actions", "gitlab-ci",

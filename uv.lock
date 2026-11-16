@@ -507,15 +507,15 @@ wheels = [
 
 [[package]]
 name = "mathema"
-version = "0.6.4"
+version = "0.6.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/b1/da0c2efbde24f0288df6cb6ec0c75d3615c03c4f4dca7b6bf40fe439864f/mathema-0.6.4.tar.gz", hash = "sha256:f42604e383a3bfdb7475e746c9a67cb325c5bdd5d493b208b5898caa712d48f1", size = 2791449, upload-time = "2026-11-08T23:55:37.028Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/f9/73352c6e8d738c9c74929f4594ca7af3450362f07c85972b21556fd8efd7/mathema-0.6.5.tar.gz", hash = "sha256:8fba3230fa8ac0d3f19654abe603a5729c0cbe2c13548702d82c2f71c3f0ee69", size = 2835167, upload-time = "2026-11-16T14:59:33.634Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/cb/4ca59e32f452184b952bca1aac75b4db3a1e023ed884eaa5fda679ed9380/mathema-0.6.4-py3-none-any.whl", hash = "sha256:81df292984d15769dd3118d42c1f67caf9bed28b04f02f88d12947980ae882e9", size = 1760439, upload-time = "2026-11-08T23:55:35.32Z" },
+    { url = "https://files.pythonhosted.org/packages/50/69/7a0f18940bcee884823321b6f5f61c04ff5d15d1ba29f1ca6534c1ea2ca5/mathema-0.6.5-py3-none-any.whl", hash = "sha256:ba3d5c7a53b57d4b6089ac37e010d05fa836256c3d556825756c8a2078de558d", size = 1782079, upload-time = "2026-11-16T14:59:31.931Z" },
 ]
 
 [[package]]
@@ -542,7 +542,7 @@ test = [
 requires-dist = [
     { name = "coverage", specifier = ">=7.13" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
-    { name = "mathema", specifier = ">=0.6.4,<0.7" },
+    { name = "mathema", specifier = ">=0.6.5,<0.7" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },

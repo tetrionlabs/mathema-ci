@@ -18,9 +18,9 @@ mode:
 - `unknown`, unless a person accepted it as risk and the acceptance is
   not stale;
 - an open transition whose action under lenient is `fail`: by default a
-  regression, and a supported claim fallen to unknown or skipped where
-  the installed core asks for a risk sign-off. A weakening from proven
-  to holds only warns under lenient, so it does not block.
+  regression, and a supported claim fallen to unknown or skipped, which
+  needs a risk sign-off. A weakening from proven to holds only warns
+  under lenient, so it does not block.
 
 These do not block, each for verify's own reason:
 
@@ -59,9 +59,8 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from mathema import transitions as _core_transitions
 from mathema.records import classify_verdict
-from mathema.transitions import DEFAULT_ACTIONS, open_transitions, read_invalidated_verdict
+from mathema.transitions import action_for, open_transitions, read_invalidated_verdict
 
 __all__ = ["BLOCKING", "ClaimRow", "ClaimState", "FunctionRow", "Report", "Side",
            "Transition", "changed_since_record", "claim_states", "exit_code", "grade",
@@ -101,13 +100,9 @@ class Transition:
 def _lenient_action(t: Mapping, actions: Mapping | None) -> str:
     """Intent:
         What verify's lenient gate does with the open transition `t`:
-        `fail`, `warn` or `pass`, decided by the installed core.
+        `fail`, `warn` or `pass`, decided by core's `transitions.action_for`.
     """
-    action_for = getattr(_core_transitions, "action_for", None)
-    if action_for is not None:
-        return action_for(dict(t), "lenient", dict(actions) if actions else None)
-    entry = (actions or DEFAULT_ACTIONS).get(str(t.get("kind") or "")) or {}
-    return entry.get("lenient", "fail")
+    return action_for(dict(t), "lenient", dict(actions) if actions else None)
 
 
 @dataclass(frozen=True)
