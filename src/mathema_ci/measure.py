@@ -71,7 +71,7 @@ __all__ = ["LEDGER_OPTION", "LEDGER_PATH", "Options", "SuiteStatus",
            "UnreadableModules", "assess_session", "copies_outside", "imported_line",
            "in_process_copies", "library_claims", "library_line", "main",
            "modules_in_report", "parse_args", "population", "project_function_key",
-           "project_packages", "run", "stored_library_claims",
+           "project_packages", "run", "same_as_source", "stored_library_claims",
            "suite_command"]
 
 T = TypeVar("T")
@@ -144,19 +144,24 @@ class SuiteStatus(int):
     `measured` is False when the run gives nothing to measure, `why` says
     so in words, and `notes` are what to check before relying on the
     scores of a run that did measure, and `imported` where the tests
-    imported each of the project's packages from."""
+    imported each of the project's packages from. `exit_as`, when set, is
+    the status measure exits with in place of the tests' own: 2 for a run
+    whose tests imported another copy of the project's code."""
 
     measured: bool
     why: str | None
     notes: tuple[str, ...]
     imported: Mapping[str, str | None]
+    exit_as: int | None
 
     def __new__(cls, status: int, *, measured: bool = True, why: str | None = None,
                 notes: tuple[str, ...] = (),
-                imported: Mapping[str, str | None] | None = None) -> SuiteStatus:
+                imported: Mapping[str, str | None] | None = None,
+                exit_as: int | None = None) -> SuiteStatus:
         made = super().__new__(cls, status)
         made.measured, made.why, made.notes = measured, why, notes
         made.imported = dict(imported or {})
+        made.exit_as = exit_as
         return made
 
 
@@ -455,25 +460,90 @@ def _is_project_copy(path: str, root: str) -> bool:
     return inside and not _INSTALLED_DIRS.intersection(rel)
 
 
+def _python_files(top: str) -> dict[str, bytes] | None:
+    """Intent:
+        The Python source under `top`, a package directory or one module
+        file, as path relative to it (empty for a file) to its bytes; None
+        when it cannot be read.
+    """
+    try:
+        if os.path.isfile(top):
+            with open(top, "rb") as fh:
+                return {"": fh.read()}
+        found: dict[str, bytes] = {}
+        for folder, folders, files in os.walk(top):
+            folders[:] = [f for f in folders if f != "__pycache__"]
+            for name in files:
+                if name.endswith(".py"):
+                    path = os.path.join(folder, name)
+                    with open(path, "rb") as fh:
+                        found[os.path.relpath(path, top)] = fh.read()
+        return found
+    except (OSError, ValueError):
+        return None
+
+
+def _source_of(name: str, root: str) -> str | None:
+    """Intent:
+        Where the project at `root` keeps the top-level package or module
+        `name`: a package directory or a `.py` file, at the root or under
+        `src`; None when it has neither.
+    """
+    for base in (root, os.path.join(root, "src")):
+        package = os.path.join(base, name)
+        try:
+            if os.path.isfile(os.path.join(package, "__init__.py")):
+                return package
+            if os.path.isfile(package + ".py"):
+                return package + ".py"
+        except ValueError:
+            return None
+    return None
+
+
+def same_as_source(name: str, path: str, root: str) -> bool:
+    """Whether the copy of the top-level package or module `name` that was
+    imported from the file `path` holds exactly the project's own source
+    for it: the same Python files with the same bytes, as an ordinary
+    install of the project leaves them."""
+    source = _source_of(name, root)
+    if source is None:
+        return False
+    installed = path if os.path.isfile(source) else os.path.dirname(path)
+    ours, theirs = _python_files(source), _python_files(installed)
+    return bool(ours) and ours == theirs
+
+
 def copies_outside(copies: Mapping[str, str | None], root: str) -> list[tuple[str, str]]:
     """The `(name, file)` pairs of `copies` (`{name: file it was imported
     from}`, None for one not imported) that are not the project's own
-    code at `root`, sorted by name."""
+    code at `root`, sorted by name. A copy outside the project that is the
+    same as its source (`same_as_source`) is the project's own code."""
     return sorted((name, path) for name, path in copies.items()
-                  if path and not _is_project_copy(path, root))
+                  if path and not _is_project_copy(path, root)
+                  and not same_as_source(name, path, root))
 
 
 def imported_line(copies: Mapping[str, str | None], root: str) -> str | None:
     """The line saying which copy of each of the project's packages was
-    imported, each relative to `root`; None when none was imported."""
-    shown = [(name, os.path.relpath(os.path.realpath(path), os.path.realpath(root)))
-             for name, path in sorted(copies.items()) if path]
-    if not shown:
-        return None
-    if len(shown) == 1:
-        return f"measure: imported {shown[0][0]} from this project ({shown[0][1]})"
-    return ("measure: imported " + ", ".join(f"{n} ({p})" for n, p in shown)
-            + " from this project")
+    imported: those from the project itself, each relative to `root`, and
+    those from an installed copy identical to the project's source, each
+    with its file; None when none was imported."""
+    found = [(name, path) for name, path in sorted(copies.items()) if path]
+    own = [(name, os.path.relpath(os.path.realpath(path), os.path.realpath(root)))
+           for name, path in found if _is_project_copy(path, root)]
+    installed = [(name, path) for name, path in found if not _is_project_copy(path, root)]
+    parts = []
+    if len(own) == 1:
+        parts.append(f"{own[0][0]} from this project ({own[0][1]})")
+    elif own:
+        parts.append(", ".join(f"{n} ({p})" for n, p in own) + " from this project")
+    if installed:
+        parts.append(", ".join(f"{n} ({p})" for n, p in installed) if len(installed) > 1
+                     else f"{installed[0][0]}")
+        parts[-1] += (" from an installed copy identical to this project's source"
+                      + (f" ({installed[0][1]})" if len(installed) == 1 else ""))
+    return "measure: imported " + "; ".join(parts) if parts else None
 
 
 def _another_copy(outside: list[tuple[str, str]], root: str, where: str) -> str:
@@ -538,7 +608,7 @@ def assess_session(status: int, session: dict | None, root: str = ".") -> SuiteS
     imported = session.get("imported") or {}
     outside = copies_outside(imported, root)
     if outside:
-        return SuiteStatus(status, measured=False,
+        return SuiteStatus(status, measured=False, exit_as=2,
                            why=_another_copy(outside, root, "the tests"))
     return SuiteStatus(status, imported=imported)
 
@@ -1163,10 +1233,14 @@ def run(options: Options, *, root: str,
     tests imported them, and `libraries` counts the store's claims about
     libraries, which the scores leave out. Returns the tests' exit status, whatever was found
     or failed after them, an interrupt included: 128 plus the signal when a
-    signal killed pytest."""
+    signal killed pytest. The one exception is a run whose tests imported
+    another copy of the project's code, which returns 2."""
     status = run_suite(options, root)
     if incomplete(status) or status == _NO_TESTS or not getattr(status, "measured", True):
         _say(f"measure: {_nothing_measured(status)}; nothing measured", sys.stderr)
+        exit_as = getattr(status, "exit_as", None)
+        if exit_as is not None:
+            return exit_as
         return 128 - status if status < 0 else int(status)
     said = imported_line({**(imported or {}), **getattr(status, "imported", {})}, root)
     if said is not None:

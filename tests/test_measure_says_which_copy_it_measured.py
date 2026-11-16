@@ -59,21 +59,66 @@ def test_a_session_that_imported_another_copy_measures_nothing(tmp_path):
     session = {"started": True, "complete": True, "tests": 2,
                "imported": {"pricing": "/elsewhere/pricing.py"}}
     result = assess_session(0, session, str(tmp_path))
-    assert not result.measured
+    assert not result.measured and result.exit_as == 2
     assert "/elsewhere/pricing.py" in result.why and str(tmp_path) in result.why
     assert "pricing" in result.why
 
 
-def test_tests_that_import_a_copy_from_elsewhere_measure_nothing(tmp_path):
+def test_tests_that_import_a_different_copy_measure_nothing_and_exit_2(tmp_path):
     root = make_project(tmp_path / "p", conftest=False)
     other = tmp_path / "other"
     other.mkdir()
-    (other / "pricing.py").write_text((root / "pricing.py").read_text())
+    (other / "pricing.py").write_text((root / "pricing.py").read_text() + "\n# another version\n")
     done = measure(root, "--no-readme", env=clean_env(PYTHONPATH=str(other)))
     assert "nothing measured" in done.stderr, done.stdout + done.stderr
     assert str(other / "pricing.py") in done.stderr
     assert not (root / "coverage.json").exists()
+    assert done.returncode == 2
+
+
+def test_tests_that_import_an_identical_installed_copy_are_measured(tmp_path):
+    root = make_project(tmp_path / "p", conftest=False)
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "pricing.py").write_bytes((root / "pricing.py").read_bytes())
+    done = measure(root, "--no-readme", env=clean_env(PYTHONPATH=str(other)))
+    assert "nothing measured" not in done.stderr, done.stdout + done.stderr
+    assert ("measure: imported pricing from an installed copy identical to this "
+            "project's source") in done.stderr
+    assert (root / "coverage.json").exists()
     assert done.returncode == 0
+
+
+def test_an_installed_package_counts_only_when_every_file_matches_the_source(tmp_path):
+    from mathema_ci.measure import same_as_source
+
+    root = tmp_path / "proj"
+    for rel, text in (("src/shop/__init__.py", "A = 1\n"), ("src/shop/prices.py", "B = 2\n"),
+                      ("src/shop/sub/__init__.py", ""), ("calc.py", "C = 3\n")):
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    site = tmp_path / "site"
+    for rel, text in (("shop/__init__.py", "A = 1\n"), ("shop/prices.py", "B = 2\n"),
+                      ("shop/sub/__init__.py", ""), ("calc.py", "C = 3\n")):
+        (site / rel).parent.mkdir(parents=True, exist_ok=True)
+        (site / rel).write_text(text)
+    (site / "shop" / "__pycache__").mkdir()
+    (site / "shop" / "__pycache__" / "prices.cpython-312.pyc").write_bytes(b"x")
+    shop, calc = str(site / "shop" / "__init__.py"), str(site / "calc.py")
+    assert same_as_source("shop", shop, str(root))
+    assert same_as_source("calc", calc, str(root))
+    assert copies_outside({"shop": shop, "calc": calc}, str(root)) == []
+
+    (site / "shop" / "prices.py").write_text("B = 3\n")
+    assert not same_as_source("shop", shop, str(root))
+    assert copies_outside({"shop": shop}, str(root)) == [("shop", shop)]
+    (site / "shop" / "prices.py").write_text("B = 2\n")
+    (site / "shop" / "extra.py").write_text("")
+    assert not same_as_source("shop", shop, str(root))
+    (site / "shop" / "extra.py").unlink()
+    (root / "src" / "shop" / "new.py").write_text("")
+    assert not same_as_source("shop", shop, str(root))
+    assert not same_as_source("ghost", str(site / "ghost.py"), str(root))
 
 
 def test_tests_that_import_the_project_s_own_copy_say_so(tmp_path):
