@@ -15,6 +15,7 @@ and a parallel run of the same code share one.
 """
 from __future__ import annotations
 
+import inspect
 import os
 import platform
 import re
@@ -42,6 +43,44 @@ def _normalise(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _top_level_names(dist: metadata.Distribution) -> set[str]:
+    """Intent:
+        The top-level importable names a distribution provides: those its
+        `top_level.txt` lists, else those its installed files show (the
+        first directory of a package, or a module file's own name).
+    """
+    listed = (dist.read_text("top_level.txt") or "").split()
+    if listed:
+        return set(listed)
+    names = set()
+    for file in dist.files or ():
+        first = file.parts[0]
+        if len(file.parts) > 1:
+            name = first
+        else:
+            name = inspect.getmodulename(first) or ""
+        if name and "." not in name and name.isidentifier():
+            names.add(name)
+    return names
+
+
+def package_providers() -> dict[str, list[str]]:
+    """The distributions that provide each top-level importable name, as
+    `importlib.metadata.packages_distributions` gives them on Python 3.11
+    and later. Python 3.10's own reads `top_level.txt` alone, which
+    distributions built without setuptools do not ship, so those would be
+    missing from every environment class computed on 3.10."""
+    providers: dict[str, list[str]] = {}
+    for dist in metadata.distributions():
+        name = dist.metadata["Name"]
+        if not name:
+            continue
+        for top in _top_level_names(dist):
+            if name not in providers.setdefault(top, []):
+                providers[top].append(name)
+    return providers
+
+
 def loaded_distributions(module_names: Iterable[str],
                          providers: Mapping[str, list[str]] | None = None
                          ) -> dict[str, str]:
@@ -50,10 +89,10 @@ def loaded_distributions(module_names: Iterable[str],
         `module_names`, as normalised name to version. Modules no
         installed distribution provides (the standard library, the
         project's own uninstalled code) contribute nothing. `providers`
-        is `metadata.packages_distributions()` when the caller has it.
+        is `package_providers()` when the caller has it.
     """
     if providers is None:
-        providers = metadata.packages_distributions()
+        providers = package_providers()
     found: dict[str, str] = {}
     for top in {name.partition(".")[0] for name in module_names}:
         for dist in providers.get(top, ()):

@@ -133,7 +133,7 @@ class TestLedger:
             return {}
         self._tops_seen |= tops
         if self._providers is None:
-            self._providers = _environment.metadata.packages_distributions()
+            self._providers = _environment.package_providers()
         return _environment.loaded_distributions(tops, self._providers)
 
     def _receive(self, report) -> None:

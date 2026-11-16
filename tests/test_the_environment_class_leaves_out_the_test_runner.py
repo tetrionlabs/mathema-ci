@@ -158,3 +158,21 @@ def test_a_plugin_that_can_change_an_outcome_by_stopping_a_test_stays_in():
     kept, excluded = class_distributions({"pytest-timeout": "2.4.0"})
     assert kept == {"pytest-timeout": "2.4.0"}
     assert excluded == []
+
+
+def test_a_distribution_without_a_top_level_file_still_provides_its_package(tmp_path, monkeypatch):
+    """A distribution built without setuptools ships no `top_level.txt`;
+    its package is found from its installed files, on every Python."""
+    from mathema_pytest._environment import loaded_distributions, package_providers
+
+    site = tmp_path / "site"
+    (site / "ledgerfake").mkdir(parents=True)
+    (site / "ledgerfake" / "__init__.py").write_text("")
+    info = site / "ledger_fake-1.2.3.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: ledger-fake\nVersion: 1.2.3\n")
+    (info / "RECORD").write_text("ledgerfake/__init__.py,,\nledger_fake-1.2.3.dist-info/METADATA,,\n"
+                                 "ledger_fake-1.2.3.dist-info/RECORD,,\n")
+    monkeypatch.syspath_prepend(str(site))
+    assert package_providers()["ledgerfake"] == ["ledger-fake"]
+    assert loaded_distributions(["ledgerfake.sub"]) == {"ledger-fake": "1.2.3"}
