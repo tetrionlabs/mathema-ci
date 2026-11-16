@@ -5,10 +5,8 @@
 Three renderings of one `mathema.badges.BadgeScores`: the ASCII triangle
 for a terminal or a text file, the SVG card for a README, and the
 shields.io endpoint payloads for the three score badges. Each is a pure
-function of the scores and the day `today` (the overall depends on which
-side of `mathema_ci.overall.ADAPT_UNTIL` the day falls and on the
-installed mathema), so the same scores on the same day always render the
-same bytes and a committed artifact diffs cleanly in git.
+function of the scores, so the same scores always render the same bytes
+and a committed artifact diffs cleanly in git.
 
 Both triangles have CLARITY at the top and IMPL and INTENT at the two
 lower corners. The full 100/100/100 triangle is the frame; each score is
@@ -23,7 +21,6 @@ its shaded share is not the overall number printed under it.
 from __future__ import annotations
 
 import math
-from datetime import date
 
 from mathema.badges import BadgeScores
 
@@ -69,11 +66,9 @@ def _inside(x: float, y: float, tri) -> bool:
     return not (has_neg and has_pos)
 
 
-def render_triangle(a: int | None, b: int | None, c: int | None,
-                    today: date | None = None) -> str:
+def render_triangle(a: int | None, b: int | None, c: int | None) -> str:
     """The ASCII triangle for implementation `a`, intent `b` and clarity
-    `c`, each 0 to 100, with the overall for the day `today` (today in
-    UTC when not given).
+    `c`, each 0 to 100, with the overall.
 
     The sharp dotted outer triangle is the full 100/100/100 frame, CLARITY
     at the apex and IMPL and INTENT the base corners. Each score is a dot
@@ -93,7 +88,7 @@ def render_triangle(a: int | None, b: int | None, c: int | None,
             return "unknown" if v is None else v
         return (f"IMPL {said(a)}   INTENT {said(b)}   CLARITY {said(c)}   "
                 f"overall unknown\n(no triangle: a dimension is unknown)")
-    score = overall_score(a, b, c, today)
+    score = overall_score(a, b, c)
     overall = "unknown" if score is None else str(score)
     scores = {"IMPL": a, "INTENT": b, "CLARITY": c}
     if min(a, b, c) < 5:
@@ -218,7 +213,7 @@ def _svg_score_point(name, score):
     return _on_spoke(_SVG_CENTRE, _SVG_RADIUS, name, f)
 
 
-def render_svg(scores: BadgeScores, today: date | None = None) -> str:
+def render_svg(scores: BadgeScores) -> str:
     """The dark card for a README: CLARITY at the top, IMPL lower left and
     INTENT lower right, the full 100/100/100 triangle as a faint dashed
     equilateral frame, and three spokes from its centre (all zero) to its
@@ -228,8 +223,7 @@ def render_svg(scores: BadgeScores, today: date | None = None) -> str:
     share of the frame is the mean of the three pairwise products of the
     scores, the overall number, which sits top right. The frame and its
     corner labels are centred in the card, each base label within its
-    corner. The overall is the one for the day `today` (today in UTC when
-    not given). The card is self-contained (no external CSS, images or
+    corner. The card is self-contained (no external CSS, images or
     font files), so it reads the same on a light or a dark README."""
     # The frame is the equilateral triangle on a circle of radius
     # _SVG_RADIUS about the centre, its three corners 120 degrees apart
@@ -239,8 +233,7 @@ def render_svg(scores: BadgeScores, today: date | None = None) -> str:
     # its middle on the card's mid-height of 150; the base labels start
     # and end at their corners, so it is centred on the mid-width too.
     w, h = 360, 300
-    overall = overall_score(scores.implementation, scores.intent, scores.clarity,
-                            today)
+    overall = overall_score(scores.implementation, scores.intent, scores.clarity)
     origin = _SVG_CENTRE          # all-zero sits at the centre
     frame = _svg_frame(origin, _SVG_RADIUS)
     apex, left, right = frame["CLARITY"], frame["IMPL"], frame["INTENT"]

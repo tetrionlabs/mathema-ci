@@ -9,7 +9,7 @@ from mathema_ci.artifacts import ci_snapshot, write_badges
 from mathema_ci.render import _SVG_PALETTE, render_svg
 
 
-def test_svg_and_snapshot_and_file_emission(tmp_path, equal_wedges_on):
+def test_svg_and_snapshot_and_file_emission(tmp_path):
     sc = BadgeScores(88, 71, 52, 48,
                      per_function={"pkg.f": {"implementation": 100,
                                              "intent": 71, "clarity": 52}})

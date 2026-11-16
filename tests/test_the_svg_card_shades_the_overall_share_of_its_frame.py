@@ -17,7 +17,7 @@ from fractions import Fraction
 import pytest
 from mathema.badges import BadgeScores
 
-from mathema_ci.overall import ADAPT_UNTIL, overall
+from mathema_ci.overall import overall
 from mathema_ci.render import render_svg
 
 _NS = "{http://www.w3.org/2000/svg}"
@@ -40,7 +40,7 @@ def _area(points):
 
 
 def _shapes(scores):
-    root = ET.fromstring(render_svg(scores, ADAPT_UNTIL))
+    root = ET.fromstring(render_svg(scores))
     polygons = list(root.iter(_NS + "polygon"))
     frame = next(p for p in polygons if p.get("stroke-dasharray"))
     shaded = next(p for p in polygons if not p.get("stroke-dasharray"))
@@ -54,7 +54,7 @@ def _share(scores):
 
 def _printed_overall(scores):
     """The overall number the card prints, its large figure top right."""
-    root = ET.fromstring(render_svg(scores, ADAPT_UNTIL))
+    root = ET.fromstring(render_svg(scores))
     figure = next(el for el in root.iter(_NS + "text") if el.get("font-size") == "20")
     return int("".join(figure.itertext()).rstrip("%"))
 
@@ -80,7 +80,7 @@ def test_the_shaded_share_is_the_mean_of_the_pairwise_products(a, b, c):
 def test_the_shaded_share_rounds_to_the_overall_the_card_prints(a, b, c):
     scores = BadgeScores(a, b, c, None)
     assert round(100 * float(_share(scores))) == _printed_overall(scores)
-    assert _printed_overall(scores) == overall(a, b, c, today=ADAPT_UNTIL)
+    assert _printed_overall(scores) == overall(a, b, c)
 
 
 @pytest.mark.parametrize("a, b, c", _CASES)

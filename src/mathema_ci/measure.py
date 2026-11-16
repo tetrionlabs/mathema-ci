@@ -39,7 +39,6 @@ import time
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import PurePosixPath
 from typing import Any, Protocol, TypeVar
 
@@ -47,7 +46,6 @@ from mathema.badges import BadgeScores
 
 from mathema_pytest._atomic import atomic_write
 
-from . import overall as _overall
 from .artifacts import DEFAULT_BADGE_DIR, write_badges
 from .core_tests import (
     Claim,
@@ -59,7 +57,7 @@ from .core_tests import (
     window_words,
 )
 from .diffmap import module_of
-from .overall import predates_equal_wedges, with_overall
+from .overall import with_overall
 from .readme import (
     badges_base,
     has_block,
@@ -991,8 +989,7 @@ def _update_readme(options: Options, root: str, base: str,
     return said
 
 
-def _write_badge_files(scores: BadgeScores | None, out: str, root: str,
-                       today: date | None = None) -> list[str]:
+def _write_badge_files(scores: BadgeScores | None, out: str, root: str) -> list[str]:
     """Intent:
         Write the badge files to `out` and the lines that say so, or the
         line that says why they were not written.
@@ -1003,7 +1000,7 @@ def _write_badge_files(scores: BadgeScores | None, out: str, root: str,
     owned = (os.path.realpath(out_dir)
              == os.path.realpath(os.path.join(root, DEFAULT_BADGE_DIR)))
     try:
-        written, pruned, adopted = write_badges(scores, out_dir, owned=owned, today=today)
+        written, pruned, adopted = write_badges(scores, out_dir, owned=owned)
     except OSError as exc:
         return [f"badge files could not be written ({_in_plain_words(exc)})"]
     lines = [f"{len(written)} badge files written to {out}"]
@@ -1110,20 +1107,17 @@ def run(options: Options, *, root: str,
         score: Callable[[str], BadgeScores],
         remote: Callable[[str], str | None],
         function_key: Callable[[str], str | None],
-        today: date | None = None,
         imported: Mapping[str, str | None] | None = None) -> int:
     """`measure` with its effects passed in: `run_suite` runs the tests
     and returns pytest's exit status, `reader` reads and stages claims
     from them (None when mathema has none), `verify` records the
     project's claims and returns what it found, `score` scores the
     project, `remote` names its git remote and `function_key` names one
-    of its functions. `today` is the day the run's overall is worked out
-    for, read once, today in UTC when not given; `imported` is where this
+    of its functions. `imported` is where this
     process imports the project's packages from, said beside where the
     tests imported them. Returns the tests' exit status, whatever was found
     or failed after them, an interrupt included: 128 plus the signal when a
     signal killed pytest."""
-    today = today or _overall.utc_today()
     status = run_suite(options, root)
     if incomplete(status) or status == _NO_TESTS or not getattr(status, "measured", True):
         _say(f"measure: {_nothing_measured(status)}; nothing measured", sys.stderr)
@@ -1133,7 +1127,7 @@ def run(options: Options, *, root: str,
         _say(said, sys.stderr)
     try:
         _report(options, root=root, status=status, reader=reader, verify=verify,
-                score=score, remote=remote, function_key=function_key, today=today)
+                score=score, remote=remote, function_key=function_key)
     except KeyboardInterrupt:
         _say("measure: interrupted after the tests; the exit status is the tests' own",
              sys.stderr)
@@ -1146,7 +1140,7 @@ def run(options: Options, *, root: str,
 def _report(options: Options, *, root: str, status: int, reader: Reader | None,
             verify: Callable[[str], Verified], score: Callable[[str], BadgeScores],
             remote: Callable[[str], str | None],
-            function_key: Callable[[str], str | None], today: date) -> None:
+            function_key: Callable[[str], str | None]) -> None:
     """Intent:
         Everything after a measured run: read and stage the claims, record
         them, score, print, keep the README block and write the badges.
@@ -1160,14 +1154,14 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
     verified, stopped = _attempt(lambda: verify(root))
     scores, unscored, warned = _scored_quietly(lambda: score(root))
     if scores is not None:
-        scores = with_overall(scores, today)
+        scores = with_overall(scores)
 
     nothing_declared = verified is not None and getattr(verified, "nothing_declared", False)
     sections: list[list[str]] = []
     if scores is not None:
         known = (scores.implementation, scores.intent, scores.clarity)
         if not nothing_declared and None not in known:
-            sections.append([render_triangle(*known, today)])
+            sections.append([render_triangle(*known)])
         sections.append(score_lines(scores, known_only=nothing_declared))
     else:
         sections.append(["What is known about your code",
@@ -1194,17 +1188,12 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
     if warned:
         notes.append(f"{_plural(warned, 'function reads', 'functions read')} module-level "
                      "state; mathema warns about each, which measure leaves out here")
-    worked_out = (scores is not None and not nothing_declared
-                  and None not in (scores.implementation, scores.intent, scores.clarity))
-    if worked_out and predates_equal_wedges(today):
-        notes.append("the installed mathema predates the equal-wedges overall, so "
-                     "overall is unknown; upgrade mathema to a release that has it")
     sections.append(check_lines(verified, stopped, notes, scored=scores is not None))
 
     closing: list[str] = []
     if options.out is not None:
         out = options.out
-        lines, problem = _attempt(lambda: _write_badge_files(scores, out, root, today))
+        lines, problem = _attempt(lambda: _write_badge_files(scores, out, root))
         closing += (lines or [] if problem is None
                     else [f"badge files could not be written ({problem})"])
     if options.write_readme:
@@ -1273,5 +1262,4 @@ def main(argv: list[str]) -> int:
                verify=verify_project,
                score=lambda root: score_project(root, options.targets),
                remote=origin_remote,
-               function_key=lambda root: project_function_key(root, options.targets),
-               today=_overall.utc_today())
+               function_key=lambda root: project_function_key(root, options.targets))
