@@ -1360,7 +1360,7 @@ def _scored_quietly(step: Callable[[], BadgeScores], root: str | None = None):
     """Intent:
         `(scores, problem, functions)`: `step` run as `_attempt` runs it,
         except that when it raises, its traceback is kept under `root` and
-        the file is named in one line on stderr. Meanwhile mathema's `StateDependenceWarning`s raised meanwhile, one per
+        the file is named in one line on stderr. mathema's `StateDependenceWarning`s raised meanwhile come back, one per
         function that reads module-level state, held back and `functions`
         the number of distinct functions they name. Every other warning
         raised meanwhile is raised again afterwards, from where it was first
