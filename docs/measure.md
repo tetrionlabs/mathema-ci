@@ -92,7 +92,9 @@ numbers" rather than printed one by one.
 `measure` is not a verification step. Problems in your claims are
 information, and `mathema verify` is the gate. The exit status is the
 tests' own, whatever goes wrong after them; what went wrong is a line
-under "Check before relying on these numbers".
+under "Check before relying on these numbers". When scoring itself raises,
+`measure` writes the traceback to `.mathema/measure-traceback.txt`, names that
+file in one line on stderr, and still exits as the tests did.
 
 ## The badge files
 

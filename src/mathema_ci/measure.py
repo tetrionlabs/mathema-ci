@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -1274,7 +1275,7 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
         reading, staging, trouble = _read_and_stage(options, reader, root)
 
     verified, stopped = _attempt(lambda: verify(root))
-    scores, unscored, warned = _scored_quietly(lambda: score(root))
+    scores, unscored, warned = _scored_quietly(lambda: score(root), root)
     if scores is not None:
         scores = with_overall(scores)
 
@@ -1336,10 +1337,30 @@ def _report(options: Options, *, root: str, status: int, reader: Reader | None,
     _say("\n\n".join("\n".join(s) for s in sections if s))
 
 
-def _scored_quietly(step: Callable[[], BadgeScores]):
+TRACEBACK_FILE = "measure-traceback.txt"
+
+
+def _keep_traceback(root: str, exc: BaseException) -> str | None:
+    """Intent:
+        Write `exc`'s traceback to `.mathema/measure-traceback.txt` under
+        `root`, replacing any earlier one, and return the path; None when
+        it could not be written.
+    """
+    path = os.path.join(root, ".mathema", TRACEBACK_FILE)
+    text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        atomic_write(path, text)
+    except (OSError, ValueError):
+        return None
+    return path
+
+
+def _scored_quietly(step: Callable[[], BadgeScores], root: str | None = None):
     """Intent:
         `(scores, problem, functions)`: `step` run as `_attempt` runs it,
-        with mathema's `StateDependenceWarning`s raised meanwhile, one per
+        except that when it raises, its traceback is kept under `root` and
+        the file is named in one line on stderr. Meanwhile mathema's `StateDependenceWarning`s raised meanwhile, one per
         function that reads module-level state, held back and `functions`
         the number of distinct functions they name. Every other warning
         raised meanwhile is raised again afterwards, from where it was first
@@ -1347,7 +1368,14 @@ def _scored_quietly(step: Callable[[], BadgeScores]):
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("default")
-        scores, problem = _attempt(step)
+        try:
+            scores, problem = step(), None
+        except (Exception, SystemExit) as exc:
+            scores, problem = None, _in_plain_words(exc)
+            if root is not None:
+                kept = _keep_traceback(root, exc)
+                where = f"; traceback in {kept}" if kept else ""
+                _say(f"measure: scoring failed ({problem}){where}", sys.stderr)
     named = set()
     for w in caught:
         kind = type(w.message)
