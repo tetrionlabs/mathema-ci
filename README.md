@@ -5,7 +5,7 @@ keep the triangle in its README, and gate each change on the debt it
 adds. The measurement is [mathema](https://github.com/tetrionlabs/mathema)'s;
 this package runs it and renders it.
 
-`pip install mathema-ci` installs it with mathema 0.6.5 or a later 0.6.
+`pip install mathema-ci` installs it with mathema 0.6.6 or a later 0.6.
 
 ## measure
 

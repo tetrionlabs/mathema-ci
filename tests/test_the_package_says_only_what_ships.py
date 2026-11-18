@@ -69,4 +69,4 @@ def test_nothing_promises_what_does_not_ship(phrase, capsys):
 
 
 def test_mathema_starts_at_the_release_mathema_ci_ships_with():
-    assert _requirement("mathema") == "mathema>=0.6.5,<0.7"
+    assert _requirement("mathema") == "mathema>=0.6.6,<0.7"
