@@ -146,6 +146,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/0c/7a64e1ac90541a8edf50daef0914848011fb057a5bf55284a4811e21939a/coverage-7.16.2-py3-none-any.whl", hash = "sha256:11d28e9123a9156cb405d8d27b44256c9a58fb5decc2073a8f17862057e3aa0f", size = 215754, upload-time = "2026-09-27T12:28:59.075Z" },
 ]
 
+[package.optional-dependencies]
+toml = [
+    { name = "tomli" },
+]
+
 [[package]]
 name = "coverage"
 version = "7.17.0"
@@ -502,15 +507,15 @@ wheels = [
 
 [[package]]
 name = "mathema"
-version = "0.6.3"
+version = "0.6.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sympy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b7/a2/cf805cfca9c53a5b2e87d9bc862c9352a3f50875d6fefe0230f2062facae/mathema-0.6.3.tar.gz", hash = "sha256:b81710d0117cab1d9e9c135f8137716594dba311e9ebb45cc1adb4b46ca29511", size = 2748872, upload-time = "2026-10-31T10:18:27.455Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/50/8ad9bc978b4fd6b73abfe45019aec7d60c6543293251013db0b164cf3b26/mathema-0.6.6.tar.gz", hash = "sha256:c44609692a20bc37bf85410506570d5baa7f0cc342963799677171579408de64", size = 2870468, upload-time = "2026-11-18T16:21:25.388Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/72/3abbedf533b9f543ff28a418c4ba3a27583a8213a20e1ca1f9da9b932317/mathema-0.6.3-py3-none-any.whl", hash = "sha256:b510da6e5f4e12e1b8a7a7910e7c13c055cd860b7bc336847dde52849132a5ac", size = 1745814, upload-time = "2026-10-31T10:18:25.523Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/3a/10e8b28acc898dd5f6494e63e9bade0fccb332187bb19de31cfaae88f95f/mathema-0.6.6-py3-none-any.whl", hash = "sha256:af68b26a68d56ef110d4485449cb33515bc81c43a7059ad749ed5287404df653", size = 1794031, upload-time = "2026-11-18T16:21:22.849Z" },
 ]
 
 [[package]]
@@ -520,6 +525,7 @@ dependencies = [
     { name = "coverage", version = "7.16.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "coverage", version = "7.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "mathema" },
+    { name = "pytest" },
     { name = "pyyaml" },
 ]
 
@@ -528,15 +534,18 @@ test = [
     { name = "hypothesis", version = "6.168.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "hypothesis", version = "6.170.13", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
+    { name = "pytest-cov" },
     { name = "pytest-xdist" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", specifier = ">=7" },
+    { name = "coverage", specifier = ">=7.13" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6" },
-    { name = "mathema", specifier = ">=0.6.2,<0.7" },
+    { name = "mathema", specifier = ">=0.6.6,<0.7" },
+    { name = "pytest", specifier = ">=8" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3" },
     { name = "pyyaml", specifier = ">=6" },
 ]
@@ -594,6 +603,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/79/42/bb4641652e58dedeac2ec51abc1f8cae4fee4ec63899a0999016229a0f2a/pytest-9.2.0.tar.gz", hash = "sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b", size = 1797555, upload-time = "2026-10-27T21:30:20.728Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/39/1f5d8c8877a0fa327db959c19341d4be61660de1ab6b7391f9eb805bcd67/pytest-9.2.0-py3-none-any.whl", hash = "sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588", size = 411776, upload-time = "2026-10-27T21:30:19.131Z" },
+]
+
+[[package]]
+name = "pytest-cov"
+version = "7.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "coverage", version = "7.16.2", source = { registry = "https://pypi.org/simple" }, extra = ["toml"], marker = "python_full_version < '3.11'" },
+    { name = "coverage", version = "7.17.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pluggy" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
 ]
 
 [[package]]

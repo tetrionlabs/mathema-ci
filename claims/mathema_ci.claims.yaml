@@ -1,0 +1,57 @@
+mathema_ci.overall.triangle_area:
+  claims:
+    - name: the_scores_rotate_freely
+      statement: 'for a in [0, 100], b in [0, 100], c in [0, 100], f(a, b, c) == f(b, c, a)'
+    - name: two_scores_swap_freely
+      statement: 'for a in [0, 100], b in [0, 100], c in [0, 100], f(a, b, c) == f(b, a, c)'
+    - name: the_overall_is_a_share_of_the_frame
+      statement: 'for a in [0, 100], b in [0, 100], c in [0, 100], 0 <= f(a, b, c) <= 100'
+    - name: three_full_scores_fill_the_frame
+      statement: 'f(100, 100, 100) == 100'
+    - name: one_empty_score_leaves_a_third_of_the_other_two
+      statement: 'for a in [0, 100], b in [0, 100], a * b / 300 - 0.5 <= f(a, b, 0) <= a * b / 300 + 0.5'
+    - name: equal_scores_give_their_square
+      statement: 'let s be {0, 1, 10, 25, 50, 75, 99, 100}, s * s / 100 - 0.5 <= f(s, s, s) <= s * s / 100 + 0.5'
+    - name: a_higher_score_never_lowers_the_overall
+      statement: 'for a in [0, 99], b in [0, 100], c in [0, 100], f(a + 1, b, c) >= f(a, b, c)'
+    - name: a_missing_implementation_is_refused
+      statement: 'missing(f, a) raises(ValueError)'
+    - name: a_missing_intent_is_refused
+      statement: 'missing(f, b) raises(ValueError)'
+    - name: a_missing_clarity_is_refused
+      statement: 'missing(f, c) raises(ValueError)'
+
+mathema_ci.measure.copies_outside:
+  claims:
+    - name: a_package_not_imported_is_never_outside
+      statement: 'let name be {"shop", "calc", "mathema"}, f({name: None}, "/r") == []'
+    - name: the_project_s_own_file_is_not_outside
+      statement: 'let rel be {"shop/__init__.py", "src/shop/__init__.py", "calc.py"}, f({"m": "/r/" + rel}, "/r") == []'
+    - name: an_installed_copy_under_the_root_is_outside
+      statement: 'let v be {"site-packages", "dist-packages"}, f({"m": "/r/.venv/lib/" + v + "/m/__init__.py"}, "/r") == [("m", "/r/.venv/lib/" + v + "/m/__init__.py")]'
+    - name: a_copy_elsewhere_is_outside
+      statement: 'let path be {"/elsewhere/m.py", "/rr/m.py", "/m.py"}, f({"m": path}, "/r") == [("m", path)]'
+
+mathema_ci.diffmap.module_of:
+  claims:
+    - name: a_leading_src_is_dropped
+      statement: 'let m be {"shop", "shop/prices", "a/b/c"}, f("src/" + m + ".py") == f(m + ".py")'
+    - name: a_package_init_is_the_package
+      statement: 'let m be {"shop", "shop/prices", "a/b"}, f(m + "/__init__.py") == f(m + ".py")'
+    - name: test_files_are_not_modules
+      statement: 'for path in {"tests/test_a.py", "test_top.py", "shop/a_test.py", "conftest.py", "shop/tests/helpers.py", "test/x.py"}, f(path) == None'
+    - name: only_python_files_inside_the_project_are_modules
+      statement: 'for path in {"shop/prices.txt", "/abs/mod.py", "../elsewhere.py", "not-a-module/thing.py", "README.md"}, f(path) == None'
+    - name: a_path_spells_its_dotted_module
+      statement: 'f("shop/prices.py") == "shop.prices"'
+    - name: a_src_path_spells_its_dotted_module
+      statement: 'f("src/calc/ops.py") == "calc.ops"'
+
+mathema_ci.measure._is_project_copy:
+  claims:
+    - name: a_file_under_the_root_is_the_project_s
+      statement: 'let rel be {"shop.py", "src/shop/__init__.py", "a/b/c.py"}, f("/r/" + rel, "/r") == True'
+    - name: an_installed_file_under_the_root_is_not
+      statement: 'let v be {"site-packages", "dist-packages"}, f("/r/.venv/lib/" + v + "/m.py", "/r") == False'
+    - name: a_file_beside_or_above_the_root_is_not
+      statement: 'let path be {"/rr/m.py", "/m.py", "/elsewhere/r/m.py"}, f(path, "/r") == False'

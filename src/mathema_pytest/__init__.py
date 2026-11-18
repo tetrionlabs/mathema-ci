@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Tetrion Ltd
-"""The pytest plugin that writes mathema's run ledger.
+"""The pytest plugin that writes mathema's test ledger.
 
 Registered through the `pytest11` entry point and inert unless the run
 asks for it. Nothing in this package imports `mathema`: the plugin runs

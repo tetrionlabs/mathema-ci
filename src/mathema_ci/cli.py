@@ -2,11 +2,10 @@
 # Copyright 2026 Tetrion Ltd
 """The `mathema-ci` command.
 
-`mathema-ci measure` is the one CI stage: it runs the project's tests
-under coverage with the run ledger on, scores the project through
-mathema, writes the artifacts and the report page, keeps the README
-block current, and exits as the tests did. Until core's own `mathema
-measure` delegates here, this console script is the entry point.
+`mathema-ci measure` runs the project's tests under coverage with the
+test ledger on, scores the project through mathema, prints what it
+found, keeps the README block current, writes the badge files when asked,
+and exits as the tests did.
 """
 from __future__ import annotations
 
@@ -18,29 +17,41 @@ from . import __version__
 
 def build_parser() -> argparse.ArgumentParser:
     """Intent:
-        The argument parser for the console script: one subcommand,
-        `measure`, whose options arrive with the command itself.
+        The argument parser for the console script: its subcommands,
+        each of whose options arrive with the command itself.
     """
     parser = argparse.ArgumentParser(
         prog="mathema-ci",
-        description="mathema in CI: tests, coverage, the triangle and the "
-                    "report page from one stage.")
+        description="mathema in CI: run the tests, measure the project and "
+                    "keep the triangle in your README, from one command.")
     parser.add_argument("--version", action="version",
                         version=f"mathema-ci {__version__}")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("measure", help="run the tests and measure the project")
+    sub.add_parser("init", help="write the review template and CI workflow "
+                                "where they are missing")
+    sub.add_parser("gate", help="fail a change on new debt in the functions it "
+                                "touches")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     """Intent:
-        Parse the arguments and dispatch; `measure` is not built yet, so
-        it says so and exits 2 rather than pretending to have run.
+        Parse the arguments and dispatch; each subcommand hands every
+        argument after its name to its own module's `main`, which parses
+        its own options (`measure` passes those after `--` to pytest).
     """
-    args = build_parser().parse_args(argv)
-    if args.command == "measure":
-        print("mathema-ci measure is not built yet", file=sys.stderr)
-        return 2
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["measure"]:
+        from . import measure
+        return measure.main(argv[1:])
+    if argv[:1] == ["init"]:
+        from . import init
+        return init.main(argv[1:])
+    if argv[:1] == ["gate"]:
+        from . import gate_run
+        return gate_run.main(argv[1:])
+    build_parser().parse_args(argv)
     build_parser().print_help()
     return 0
 

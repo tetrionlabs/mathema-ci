@@ -1,44 +1,84 @@
 # mathema-ci
 
-mathema in CI. One stage that runs your tests, measures implementation,
-intent and clarity through [mathema](https://github.com/tetrionlabs/mathema),
-and publishes the triangle: the artifacts, a report page, the block in
-your README, and the GitHub and GitLab pipeline templates that run it on
-your own runners.
+mathema in CI: measure a project's implementation, intent and clarity,
+keep the triangle in its README, and gate each change on the debt it
+adds. The measurement is [mathema](https://github.com/tetrionlabs/mathema)'s;
+this package runs it and renders it.
 
-This package renders and runs. The measurement itself is mathema's.
+`pip install mathema-ci` installs it with mathema 0.6.6 or a later 0.6.
 
-Status: not released. The package name is reserved; the first release
-is 0.1.
+## measure
 
-## What it will do
+Runs the tests under coverage, records the claims with `mathema verify`,
+scores the project, prints what it found, keeps the triangle in a block
+between `<!-- mathema:badges:start -->` and `<!-- mathema:badges:end -->`
+in the README, and exits as the tests did.
 
 ```
-mathema-ci measure --out mathema-report -- -n 2
+mathema-ci measure --out
 ```
 
-runs the project's tests under coverage with the run ledger on, scores
-the project, writes the triangle and the report page to the output
-directory, keeps the README block current, prints the numbers, and exits
-as the tests did.
+`--out` writes the badge files to `.mathema/badges/`, `--target MODULE`
+scores the functions defined in MODULE, `--stage` keeps the claims read
+from the tests that hold, and everything after `--` goes to pytest. The
+overall is the area spanned by all three scores. More in [docs/measure.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/measure.md).
 
-## Layout
+## init
 
-- `src/mathema_ci/`: the `measure` command, the artifact writers, the
-  report page, the README block, the pipeline templates. Today it holds
-  `render.render_triangle`, `render.render_svg`, `render.shields_payloads`,
-  `artifacts.write_badges`, `artifacts.ci_snapshot`,
-  `artifacts.readme_snippet` and `templates.write_ci_templates`.
-- `src/mathema_pytest/`: the pytest plugin that writes the run ledger.
-  It imports nothing from mathema, since it runs inside the measured
-  project's test process.
+Writes a pull or merge request template and the CI workflow that runs
+`mathema verify`, only where a file is missing.
+
+```
+mathema-ci init [--provider github|gitlab|both] [--dry-run]
+```
+
+More in [docs/init.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/init.md).
+
+## gate
+
+Fails a change that makes a claim falsified or unknown, opens a
+regression on it, or lowers clarity, on a function it touches. It runs no tests, so it runs
+after `mathema verify` or `measure`.
+
+```
+mathema-ci gate [--base REF] [--base-snapshot REF:PATH | --remeasure]
+                [--remeasure-budget SECONDS] [--format text|json]
+```
+
+How it finds the base and what blocks: [docs/gate.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/gate.md).
+
+## In CI
+
+GitHub Actions:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 2
+- run: pip install -e . mathema-ci
+- run: mathema-ci measure --out
+- run: mathema-ci gate
+  if: github.event_name == 'pull_request'
+```
+
+GitLab CI:
+
+```yaml
+mathema:
+  image: python:3.12
+  script:
+    - pip install -e . mathema-ci
+    - mathema-ci measure --out
+    - if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ]; then mathema-ci gate; fi
+```
+
+The pytest plugin that writes the test ledger is described in
+[docs/test-ledger.md](https://github.com/tetrionlabs/mathema-ci/blob/main/docs/test-ledger.md).
 
 ## Licence
 
 Apache License 2.0, as mathema-language. The measurement this package
 runs is mathema's, under mathema's own licence. See `LICENSE` and
-`NOTICE`.
-
-The mathema name and the triangle mark are trademarks of Tetrion Ltd and
-are not licensed under the Apache License (its section 6 grants no
-trademark rights).
+`NOTICE`. The mathema name and the triangle mark are trademarks of
+Tetrion Ltd and are not licensed under the Apache License (its section 6
+grants no trademark rights).
