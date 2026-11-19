@@ -1350,10 +1350,62 @@ def _keep_traceback(root: str, exc: BaseException) -> str | None:
     text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        atomic_write(path, text)
+        atomic_write(path, _without_local_paths(text, root))
+        _left_out_of_commits(os.path.dirname(path), TRACEBACK_FILE)
     except (OSError, ValueError):
         return None
     return path
+
+
+def _without_local_paths(text: str, root: str) -> str:
+    """Intent:
+        `text` with every absolute local path rewritten: a path under
+        `root` relative to it, a file of this package from `mathema_ci/`
+        on, a path under an installed packages directory from
+        `site-packages/` on, a path under the running
+        Python as `<python>/...`, and a path under the home directory as
+        `~/...`. Each prefix is matched both as given and resolved through
+        symbolic links, longest first.
+    """
+    swaps: dict[str, str] = {}
+
+    def swap(prefix: str | None, shown: str) -> None:
+        if not prefix:
+            return
+        for spelled in {os.path.abspath(prefix), os.path.realpath(prefix)}:
+            if spelled not in (os.sep, ""):
+                swaps.setdefault(spelled.rstrip(os.sep) + os.sep, shown)
+
+    swap(root, "")
+    swap(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "")
+    for entry in sys.path:
+        if os.path.basename(entry.rstrip(os.sep)) == "site-packages":
+            swap(entry, "site-packages" + os.sep)
+    for prefix in (sys.prefix, sys.base_prefix, sys.exec_prefix):
+        swap(prefix, "<python>" + os.sep)
+    swap(os.path.expanduser("~"), "~" + os.sep)
+    for prefix in sorted(swaps, key=len, reverse=True):
+        text = text.replace(prefix, swaps[prefix])
+    return text
+
+
+def _left_out_of_commits(directory: str, name: str) -> None:
+    """Intent:
+        Make sure `directory`'s `.gitignore` holds the line `/name`,
+        adding it after whatever the file already says and creating the
+        file when there is none.
+    """
+    ignore = os.path.join(directory, ".gitignore")
+    line = "/" + name
+    try:
+        with open(ignore, encoding="utf-8") as fh:
+            current = fh.read()
+    except FileNotFoundError:
+        current = ""
+    if line in (held.strip() for held in current.splitlines()):
+        return
+    joiner = "" if not current or current.endswith("\n") else "\n"
+    atomic_write(ignore, current + joiner + line + "\n")
 
 
 def _scored_quietly(step: Callable[[], BadgeScores], root: str | None = None):
