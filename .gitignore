@@ -2,10 +2,6 @@
 .smd/
 *.smd
 
-# assistant/session files, never committed
-.claude/
-CLAUDE.md
-
 # macOS
 .DS_Store
 
