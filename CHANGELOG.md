@@ -4,7 +4,7 @@ Notable changes to mathema-ci are recorded here from its first public release on
 
 ## 0.1.0
 
-- The first release, for mathema 0.6.6 or a later 0.6, whose own badges
+- The first release, for mathema 0.6.6.1 or a later 0.6, whose own badges
   writer is off by default.
 - `mathema-ci measure` runs the tests under coverage, records the claims
   with `mathema verify`, scores the project, prints what is known about
